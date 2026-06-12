@@ -19,30 +19,47 @@ const TRAFFIC_URL = process.env.TRAFFIC_SERVICE_URL;
 const ENVIRONMENT_URL = process.env.ENVIRONMENT_SERVICE_URL;
 const ML_URL = process.env.PYTHON_ML_URL;
 
-// -----------------------
-// MIDDLEWARE RATE LIMITER
-// -----------------------
-const limiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 menit
-    max: 60,
+// ---------------
+// REQUEST LOGGING
+// ---------------
+app.use(morgan(':timestamp :method :url :status :response-time ms'));
+morgan.token('timestamp', () => new Date().toISOString());
+
+// -------------
+// RATE LIMITERS
+// -------------
+// Global Rate Limit (100 req/15 menit per IP)
+const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
-        status: 429,
-        message: "Terlalu banyak request ke Gateway, silakan coba lagi nanti"
+        status: "error",
+        code: 429,
+        message: "Terlalu banyak permintaan dari alamat IP ini, silakan coba lagi nanti"
     }
 });
+app.use(globalLimiter);
 
-app.use(limiter);
+// Token Rate Limit (500 req/1 jam untuk user login)
+const authLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, 
+    max: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.headers.authorization || req.ip,
+    message: {
+        status: "error",
+        code: 429,
+        message: "Terlalu banyak permintaan untuk token ini, silakan coba lagi nanti"
+    }
+});
+app.use(authLimiter);
 
-// -----------------------
-// MIDDLEWARE LOGGING
-// -----------------------
-app.use(morgan('dev'));
-
-// ---------------------------
-// MIDDLEWARE JWT VERIFICATION
-// ---------------------------
+// ----------------
+// JWT VERIFICATION
+// ----------------
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -50,7 +67,8 @@ function authenticateToken(req, res, next) {
     if (!token) {
         return res.status(401).json({
             status: "error",
-            message: "Akses ditolak. Membutuhkan Token JWT!"
+            code: 401,
+            message: "Akses ditolak. Membutuhkan Token JWT"
         });
     }
 
@@ -58,75 +76,74 @@ function authenticateToken(req, res, next) {
         if (err) {
             return res.status(403).json({
                 status: "error",
-                message: "Token JWT yang diberikan tidak valid atau sudah kadaluwarsa"
+                code: 403,
+                message: "Dilarang masuk! Token tidak valid atau telah kedaluwarsa"
             });
         }
         req.user = user;
-        next();
+        // Kalo token valid, masukin ke limiter khusus token
+        authLimiter(req, res, next);
     });
 }
 
-// -----------------------
-// HEALTH CHECK ENDPOINT
-// -----------------------
-app.get('/health', (req, res) => {
-    res.json({
-        status: "UP",
-        service: "API Gateway"
-    });
+// -----------------
+// HEALTH AGGREGATOR 
+// -----------------
+app.get('/health', async (req, res) => {
+    const services = [
+        { name: "oauth-server", url: `${OAUTH_URL}/health` },
+        { name: "citizen-service", url: `${CITIZEN_URL}/health` },
+        { name: "traffic-service", url: `${TRAFFIC_URL}/health` },
+        { name: "environment-service", url: `${ENVIRONMENT_URL}/health` },
+        { name: "python-ml-service", url: `${ML_URL}/health` }
+    ];
+
+    const healthStatus = {
+        gateway: "UP",
+        upstreams: {}
+    };
+
+    for (let service of services) {
+        try {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 1000); // timeout 1 detik
+            const response = await fetch(service.url, { signal: controller.signal });
+            clearTimeout(id);
+            healthStatus.upstreams[service.name] = response.ok ? "UP" : "DOWN";
+        } catch (err) {
+            healthStatus.upstreams[service.name] = "DOWN";
+        }
+    }
+    res.json(healthStatus);
 });
 
-// -----------------------------------
+// -------------
 // ROUTING PROXY
-// -----------------------------------
-// Proxy ke OAuth Server (Port 3002) 
-app.use('/oauth', createProxyMiddleware({
-    target: OAUTH_URL,
-    changeOrigin: true
-}));
+// -------------
+const proxyOptions = (target) => ({
+    target,
+    changeOrigin: true,
+    onError: (err, req, res) => {
+        req.status(502).json({
+            status: "error",
+            code: 502,
+            message: "Bad Gateway. Layanan tujuan sedang tidak aktif"
+        });
+    }
+});
 
-// Citizen Service (PHP MVC - Anggota 3) -> /api/tickets, /api/reports, /api/notifications
-app.use('/api/tickets', authenticateToken, createProxyMiddleware({
-    target: CITIZEN_URL,
-    changeOrigin: true
-}));
-
-app.use('/api/reports', authenticateToken, createProxyMiddleware({
-    target: CITIZEN_URL,
-    changeOrigin: true
-}));
-
-app.use('/api/notifications', authenticateToken, createProxyMiddleware({
-    target: CITIZEN_URL,
-    changeOrigin: true
-}));
-
-// Traffic Service (PHP MVC - Anggota 4) -> /api/traffic/location, /api/traffic/current, /api/traffic/eta
-app.use('/api/traffic', authenticateToken, createProxyMiddleware({
-    target: TRAFFIC_URL,
-    changeOrigin: true
-}));
-
-// Environment Service (PHP MVC - Anggota 5) -> /api/environment/passenger, /api/environment/temperature, /api/environment/alerts
-app.use('/api/environment', authenticateToken, createProxyMiddleware({
-    target: ENVIRONMENT_URL,
-    changeOrigin: true
-}));
-
-// Python ML Service (FastAPI - Anggota 6) -> /predict/eta, /predict/passenger, /detect/anomaly
-app.use('/predict', authenticateToken, createProxyMiddleware({
-    target: ML_URL,
-    changeOrigin: true
-}));
-
-app.use('/detect', authenticateToken, createProxyMiddleware({
-    target: ML_URL,
-    changeOrigin: true
-}));
+app.use('/oauth', createProxyMiddleware(proxyOptions(OAUTH_URL)));
+app.use('/api/tickets', createProxyMiddleware(proxyOptions(CITIZEN_URL)));
+app.use('/api/reports', createProxyMiddleware(proxyOptions(CITIZEN_URL)));
+app.use('/api/notifications', createProxyMiddleware(proxyOptions(CITIZEN_URL)));
+app.use('/api/traffic', authenticateToken, createProxyMiddleware(proxyOptions(TRAFFIC_URL)));
+app.use('/api/environment', authenticateToken, createProxyMiddleware(proxyOptions(ENVIRONMENT_URL)));
+app.use('/predict', authenticateToken, createProxyMiddleware(proxyOptions(ML_URL)));
+app.use('/detect', authenticateToken, createProxyMiddleware(proxyOptions(ML_URL)));
 
 // -----------------------
 // SERVER RUNNING
 // -----------------------
 app.listen(PORT, () => {
-    console.log(`[API-GATEWAY] Berjalan di port ${PORT}`);
+    console.log(`[GATEWAY] Berjalan di port ${PORT}`);
 });
