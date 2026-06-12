@@ -13,6 +13,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // ----------- 
 // URL SERVICE (portnya blum fix)
 // -----------
+const OAUTH_URL = process.env.OAUTH_SERVICE_URL;
 const CITIZEN_URL = process.env.CITIZEN_SERVICE_URL;
 const TRAFFIC_URL = process.env.TRAFFIC_SERVICE_URL;
 const ENVIRONMENT_URL = process.env.ENVIRONMENT_SERVICE_URL;
@@ -76,8 +77,14 @@ app.get('/health', (req, res) => {
 });
 
 // -----------------------------------
-// MIDDLEWARE SERVICE
+// ROUTING PROXY
 // -----------------------------------
+// Proxy ke OAuth Server (Port 3002) 
+app.use('/oauth', createProxyMiddleware({
+    target: OAUTH_URL,
+    changeOrigin: true
+}));
+
 // Citizen Service (PHP MVC - Anggota 3) -> /api/tickets, /api/reports, /api/notifications
 app.use('/api/tickets', authenticateToken, createProxyMiddleware({
     target: CITIZEN_URL,
