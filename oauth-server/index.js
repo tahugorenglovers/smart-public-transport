@@ -25,7 +25,7 @@ const db = await mysql.createPool({
 });
 
 // ------------------------------
-// Fungsi Buat Hasilkan Token JWT
+// Fungsi Buat Hasilin Token JWT
 // ------------------------------
 function generateTokens(user) {
     const accessToken = jwt.sign({ 
@@ -46,17 +46,41 @@ function generateTokens(user) {
     };
 }
 
-// -----------------------------
-// ENDPOINT 1: POST /oauth/token 
-// -----------------------------
+// -----------------
+// POST /oauth/token 
+// -----------------
 app.post('/oauth/token', async (req, res) => {
-    const { email, password, google_token } = req.body;
+    const { email, password, google_token, refresh_token, grant_type } = req.body;
 
     try {
         let user = null;
+        if (grant_type === 'refresh_token' || refresh_token) {
+            const tokenToVerify = refresh_token;
+            if (!tokenToVerify) {
+                return res.status(400).json({
+                  error: "Refresh token diperlukan"  
+                });
+            }
 
-        // Login lewat Google OAuth
-        if (google_token) {
+            try {
+                const decode = jwt.verify(tokenToVerify, JWT_REFRESH_SECRET);
+                
+                const [rows] = await db.query('SELECT * FROM citizen_users WHERE id = ?', [decode.id]);
+                user = rows[0];
+                if (!user) {
+                    return res.status(401).json({
+                        error: "User tidak ditemukan"
+                    });
+                }
+            } catch (err) {
+                return res.status(401).json({ 
+                    error: "Refresh token tidak valid atau expired" 
+                });
+            }
+        }
+
+        // Login Google OAuth
+        else if (google_token) {
             // Verifikasi token google ke API Google
             const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${google_token}`);
             if (!googleRes.ok) {
@@ -98,7 +122,7 @@ app.post('/oauth/token', async (req, res) => {
             if (!isMatch) return res.status(401).json({ error: "Email atau password salah" });
         } else {
             return res.status(400).json({ 
-                error: "Membutuhkan email/password atau google_token" 
+                error: "Method login tidak dikenali" 
             });
         }
 
@@ -117,9 +141,9 @@ app.post('/oauth/token', async (req, res) => {
     }
 });
 
-// ----------------------------------
-// ENDPOINT 2: POST /oauth/introspect
-// ----------------------------------
+// ----------------------
+// POST /oauth/introspect
+// ----------------------
 app.post('/oauth/introspect', (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ 
@@ -147,9 +171,9 @@ app.post('/oauth/introspect', (req, res) => {
     }
 });
 
-// ------------------------------
-// ENDPOINT 3: POST /oauth/revoke
-// ------------------------------
+// ------------------
+// POST /oauth/revoke
+// ------------------
 app.post('/oauth/revoke', (req, res) => {
     const { token } = req.body;
     // Pada sistem stateless tanpa redis/DB token blacklist, cukup me-return success
