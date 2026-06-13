@@ -6,15 +6,16 @@ namespace App\Middleware;
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
+use Psr\Http\Message\ServerRequestInterface as Request;
 
 class AuthMiddleware
 {
     /**
-     * Validate Bearer JWT token.
+     * Validate Bearer JWT token dari Slim PSR-7 Request.
      */
-    public static function handle(): ?int
+    public static function handle(Request $request): ?int
     {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        $authHeader = $request->getHeaderLine('Authorization');
 
         if (empty($authHeader) || !str_starts_with($authHeader, 'Bearer ')) {
             return null;
