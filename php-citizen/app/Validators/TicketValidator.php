@@ -2,20 +2,29 @@
 
 declare(strict_types=1);
 
-namespace App\Middleware;
+namespace App\Validators;
 
-class CorsMiddleware
+class TicketValidator
 {
-    public static function handle(): void
+    public static function validateStore(array $data): array
     {
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type, Authorization');
-        header('Content-Type: application/json');
+        $errors = [];
 
-        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-            http_response_code(204);
-            exit;
+        if (empty($data['route_id'])) {
+            $errors[] = 'route_id is required';
+        } elseif (!is_numeric($data['route_id']) || (int) $data['route_id'] <= 0) {
+            $errors[] = 'route_id must be a positive integer';
         }
+
+        if (!empty($errors)) {
+            return ['valid' => false, 'errors' => $errors];
+        }
+
+        return [
+            'valid' => true,
+            'data'  => [
+                'route_id' => (int) $data['route_id'],
+            ],
+        ];
     }
 }
