@@ -13,20 +13,41 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // ----------- 
 // URL SERVICE (portnya blum fix)
 // -----------
-const OAUTH_URL = process.env.OAUTH_SERVICE_URL;
-const CITIZEN_URL = process.env.CITIZEN_SERVICE_URL;
-const TRAFFIC_URL = process.env.TRAFFIC_SERVICE_URL;
-const ENVIRONMENT_URL = process.env.ENVIRONMENT_SERVICE_URL;
-const ML_URL = process.env.PYTHON_ML_URL;
+const OAUTH_SERVICE_URL = process.env.OAUTH_SERVICE_URL;
+const CITIZEN_SERVICE_URL = process.env.CITIZEN_SERVICE_URL;
+const TRAFFIC_SERVICE_URL = process.env.TRAFFIC_SERVICE_URL;
+const ENV_SERVICE_URL = process.env.ENV_SERVICE_URL;
+const PYTHON_ML_URL = process.env.PYTHON_ML_URL;
 
 // ---------------
 // REQUEST LOGGING
 // ---------------
-app.use(morgan(':timestamp :method :url :status :response-time ms'));
-morgan.token('timestamp', () => new Date().toISOString());
+app.use(morgan((tokens, req, res) => {
+    return JSON.stringify({
+        timestamp: new Date().toISOString(),
+        method: tokens.method(req, res),
+        path: tokens.url(req, res),
+        status: parseInt(tokens.status(req, res)),
+        responseTime: `${tokens['response-time'](req, res)} ms`
+    });
+}));
+
+// --------------
+// STANDARD ERROR
+// --------------
+const sendStandardError = (res, statusCode, message, serviceName = "api-gateway") => {
+    return res.status(statusCode).json({
+        status: "error",
+        code: statusCode,
+        data: null,
+        message: message,
+        timestamp: new Date().toISOString(),
+        service: serviceName
+    });
+};
 
 // -------------
-// RATE LIMITERS
+// RATE LIMITING
 // -------------
 // Global Rate Limit (100 req/15 menit per IP)
 const globalLimiter = rateLimit({
@@ -34,11 +55,7 @@ const globalLimiter = rateLimit({
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    message: {
-        status: "error",
-        code: 429,
-        message: "Terlalu banyak permintaan dari alamat IP ini, silakan coba lagi nanti"
-    }
+    handler: (req, res) => sendStandardError(req, 429, "Terlalu banyak permintaan dari IP ini, coba lagi nanti")
 });
 app.use(globalLimiter);
 
@@ -49,13 +66,8 @@ const authLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => req.headers.authorization || req.ip,
-    message: {
-        status: "error",
-        code: 429,
-        message: "Terlalu banyak permintaan untuk token ini, silakan coba lagi nanti"
-    }
+    handler: (req, res) => sendStandardError(req, 429, "Terlalu banyak permintaan untuk token ini, coba lagi nanti")
 });
-app.use(authLimiter);
 
 // ----------------
 // JWT VERIFICATION
@@ -65,20 +77,12 @@ function authenticateToken(req, res, next) {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-        return res.status(401).json({
-            status: "error",
-            code: 401,
-            message: "Akses ditolak. Membutuhkan Token JWT"
-        });
+        return sendStandardError(res, 401, "Akses ditolak. Membutuhkan Token JWT");
     }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) {
-            return res.status(403).json({
-                status: "error",
-                code: 403,
-                message: "Dilarang masuk! Token tidak valid atau telah kedaluwarsa"
-            });
+            return sendStandardError(res, 403, "Token tidak valid atau telah kedaluwarsa");
         }
         req.user = user;
         // Kalo token valid, masukin ke limiter khusus token
@@ -90,60 +94,69 @@ function authenticateToken(req, res, next) {
 // HEALTH AGGREGATOR 
 // -----------------
 app.get('/health', async (req, res) => {
-    const services = [
-        { name: "oauth-server", url: `${OAUTH_URL}/health` },
-        { name: "citizen-service", url: `${CITIZEN_URL}/health` },
-        { name: "traffic-service", url: `${TRAFFIC_URL}/health` },
-        { name: "environment-service", url: `${ENVIRONMENT_URL}/health` },
-        { name: "python-ml-service", url: `${ML_URL}/health` }
+    const upstreams = [
+        { name: "oauth-server", url: `${OAUTH_SERVICE_URL}/health` },
+        { name: "citizen-service", url: `${CITIZEN_SERVICE_URL}/health` },
+        { name: "traffic-service", url: `${TRAFFIC_SERVICE_URL}/health` },
+        { name: "environment-service", url: `${ENV_SERVICE_URL}/health` },
+        { name: "python-ml-service", url: `${PYTHON_ML_URL}/health` }
     ];
 
-    const healthStatus = {
-        gateway: "UP",
-        upstreams: {}
-    };
+    const upstreamStatus = {};
 
-    for (let service of services) {
+    for (let service of upstreams) {
         try {
             const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), 1000); // timeout 1 detik
+            const timeoutId = setTimeout(() => controller.abort(), 1500); // timeout 1,5 detik
+            
             const response = await fetch(service.url, { signal: controller.signal });
-            clearTimeout(id);
-            healthStatus.upstreams[service.name] = response.ok ? "UP" : "DOWN";
+            clearTimeout(timeoutId);
+            upstreamStatus[service.name] = response.ok ? "UP" : "DOWN";
         } catch (err) {
-            healthStatus.upstreams[service.name] = "DOWN";
+            upstreamStatus[service.name] = "DOWN";
         }
     }
-    res.json(healthStatus);
+    return res.status(200).json({
+        status: "success",
+        code: 200,
+        data: {
+            gateway: "UP",
+            upstreams: upstreamStatus
+        },
+        message: "Status Health Check berhasil dirangkum",
+        timestamp: new Date().toISOString(),
+        service: "api-gateway"
+    });
 });
 
 // -------------
 // ROUTING PROXY
 // -------------
-const proxyOptions = (target) => ({
-    target,
+const configureProxy = (targetUrl, serviceName) => ({
+    target: targetUrl,
     changeOrigin: true,
     onError: (err, req, res) => {
-        req.status(502).json({
-            status: "error",
-            code: 502,
-            message: "Bad Gateway. Layanan tujuan sedang tidak aktif"
-        });
+        sendStandardError(res, 502, `Bad Gateway. Layanan [${serviceName}] sedang tidak aktif`, serviceName);
     }
 });
 
-app.use('/oauth', createProxyMiddleware(proxyOptions(OAUTH_URL)));
-app.use('/api/tickets', createProxyMiddleware(proxyOptions(CITIZEN_URL)));
-app.use('/api/reports', createProxyMiddleware(proxyOptions(CITIZEN_URL)));
-app.use('/api/notifications', createProxyMiddleware(proxyOptions(CITIZEN_URL)));
-app.use('/api/traffic', authenticateToken, createProxyMiddleware(proxyOptions(TRAFFIC_URL)));
-app.use('/api/environment', authenticateToken, createProxyMiddleware(proxyOptions(ENVIRONMENT_URL)));
-app.use('/predict', authenticateToken, createProxyMiddleware(proxyOptions(ML_URL)));
-app.use('/detect', authenticateToken, createProxyMiddleware(proxyOptions(ML_URL)));
+// Publik
+app.use('/oauth', createProxyMiddleware(configureProxy(OAUTH_SERVICE_URL, "oauth-server")));
+
+// Protected
+app.use('/api/citizens', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
+app.use('/api/reports', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
+app.use('/api/notifications', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
+
+app.use('/api/traffic', authenticateToken, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
+app.use('/api/environment', authenticateToken, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
+
+app.use('/predict', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
+app.use('/detect', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
 
 // -----------------------
 // SERVER RUNNING
 // -----------------------
 app.listen(PORT, () => {
-    console.log(`[GATEWAY] Berjalan di port ${PORT}`);
+    console.log(`[API-GATEWAY] Berjalan di port ${PORT}`);
 });
