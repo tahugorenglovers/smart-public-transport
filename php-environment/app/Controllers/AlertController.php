@@ -12,13 +12,14 @@ class AlertController {
     public function index(): void {
         $alerts = $this->model->getActiveAlerts();
 
-        echo json_encode([
-            'status' => 'success',
-            'code' => 200,
-            'data' => $alerts,
-            'message' => 'Active alerts retrieved',
-            'service' => 'environment-service',
-            'timestamp' => date('c')
-        ]);
+        $formatted = array_map(function ($alert) {
+            return [
+                'bus_id' => $alert['bus_id'],
+                'alert_type' => $alert['alert_type'],
+                'severity' => $alert['severity']
+            ];
+        }, $alerts);
+
+        echo json_encode($formatted);
     }
 }

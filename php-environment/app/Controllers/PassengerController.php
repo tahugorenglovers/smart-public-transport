@@ -36,6 +36,11 @@ class PassengerController {
         $record = $this->model->create($busId, $passengerCount);
         $status = $this->model->getStatus($passengerCount);
 
+        $this->publisher->publish('passenger.updated', [
+            'bus_id' => $busId,
+            'passenger_count' => $passengerCount
+        ]);
+
         if ($status === 'PENUH' || $status === 'PADAT') {
             $this->publisher->publish('bus.overcrowded', [
                 'bus_id' => $busId,

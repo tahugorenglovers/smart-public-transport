@@ -22,30 +22,29 @@ class RabbitMQConsumer {
         $this->alertModel = new Alert();
 
         $this->channel->exchange_declare('city.events', 'topic', false, true, false);
-        $this->channel->queue_declare('env.anomaly.alert', false, true, false, false);
-        $this->channel->queue_bind('env.anomaly.alert', 'city.events', 'anomaly.alert');
+        $this->channel->queue_declare('env.anomaly.detected', false, true, false, false);
+        $this->channel->queue_bind('env.anomaly.detected', 'city.events', 'bus.anomaly.detected');
     }
 
     public function listen(): void {
-        echo "Environment Service - Listening for anomaly.alert events...\n";
+        echo "Environment Service - Listening for bus.anomaly.detected events...\n";
 
         $callback = function (AMQPMessage $msg) {
             $data = json_decode($msg->getBody(), true);
 
             $busId = (int)($data['bus_id'] ?? 0);
-            $alertType = $data['anomaly_type'] ?? 'anomaly_detected';
             $severity = $data['severity'] ?? 'Peringatan';
-            $description = $data['description'] ?? 'Anomaly detected by ML service';
+            $description = $data['message'] ?? 'Anomaly detected by ML service';
 
             if ($busId > 0) {
-                $this->alertModel->create($busId, $alertType, $severity, $description);
-                echo "[ALERT SAVED] bus_id={$busId}, type={$alertType}, severity={$severity}\n";
+                $this->alertModel->create($busId, 'anomaly_detected', $severity, $description);
+                echo "[ALERT SAVED] bus_id={$busId}, severity={$severity}\n";
             }
 
             $msg->ack();
         };
 
-        $this->channel->basic_consume('env.anomaly.alert', '', false, false, false, false, $callback);
+        $this->channel->basic_consume('env.anomaly.detected', '', false, false, false, false, $callback);
 
         while ($this->channel->is_consuming()) {
             $this->channel->wait();
