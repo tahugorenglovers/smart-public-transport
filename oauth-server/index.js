@@ -179,7 +179,6 @@ app.post('/oauth/token', async (req, res) => {
             message: "Tipe Grant yang dicari tidak ditemukan" 
         });
     } catch (err) {
-        console.error(err);
         return res.status(500).json({ 
             status: "error",
             code: 500,
@@ -219,12 +218,40 @@ app.post('/oauth/introspect', (req, res) => {
 // ------------------
 // POST /oauth/revoke
 // ------------------
-app.post('/oauth/revoke', (req, res) => {
-    return res.status(200).json({
-        status: "success",
-        code: 200,
-        message: "Token has been successfully revoked"
-    });
+app.post('/oauth/revoke', async (req, res) => {
+    const { token } = req.body;
+
+    if (!token) {
+        return res.status(400).json({ 
+            status: "error",
+            code: 400,
+            message: "Token diperlukan, silakan masukkan token yang sesuai" 
+        });
+    }
+
+    try {
+        const decoded = jwt.decode(token);
+
+        // ubah exp time ke format DATETIME MySQL
+        const expiryDate = decoded && decoded.exp
+            ? new Date(decoded.exp * 1000).toISOString().slice(0, 19).replace('T', ' ')
+            : new Date(Date.now() + 3600000).toISOString().slice(0, 19).replace('T', ' ');
+    
+        await db.query('INSERT INTO oauth_token_blacklist (token, expired_at) VALUES (?, ?)', [token, expiryDate]);
+        return res.status(200).json({
+            status: "success",
+            code: 200,
+            message: "Token sudah diblacklist dan di-revoke"
+        });
+    } catch (err) {
+        return res.status(500).json({ 
+            status: "error", 
+            code: 500,
+            message: "Gagal untuk me-revoke token, coba lagi nanti" 
+        });
+    }
+
+    
 });
 
 app.listen(PORT, () => {
