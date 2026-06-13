@@ -14,7 +14,8 @@
     "express-rate-limit": "^8.5.2",
     "http-proxy-middleware": "^3.0.6",
     "jsonwebtoken": "^9.0.3",
-    "morgan": "^1.11.0"
+    "morgan": "^1.11.0",
+    "mysql2": "^3.22.5"
   },
   "description": ""
 }

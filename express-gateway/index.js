@@ -5,10 +5,21 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import morgan from 'morgan';
+import mysql from 'mysql2';
 
 const app = express();
 const PORT = process.env.PORT;
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// ----------------
+// KONEKSI DATABASE
+// ----------------
+const db = await mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+});
 
 // ----------- 
 // URL SERVICE (portnya blum fix)
@@ -72,7 +83,7 @@ const authLimiter = rateLimit({
 // ----------------
 // JWT VERIFICATION
 // ----------------
-function authenticateToken(req, res, next) {
+async function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
@@ -80,14 +91,27 @@ function authenticateToken(req, res, next) {
         return sendStandardError(res, 401, "Akses ditolak. Membutuhkan Token JWT");
     }
 
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) {
-            return sendStandardError(res, 403, "Token tidak valid atau telah kedaluwarsa");
+    try {
+        const [rows] = await db.query('SELECT id FROM oauth_token_blacklist WHERE token = ?', [token]);
+        if (rows.length > 0) {
+            return sendStandardError(res, 401, "Token yang dimsukkan sudah di-blacklist");
         }
-        req.user = user;
-        // Kalo token valid, masukin ke limiter khusus token
-        authLimiter(req, res, next);
-    });
+        
+        jwt.verify(token, JWT_SECRET, (err, user) => {
+            if (err) {
+                return sendStandardError(res, 403, "Token tidak valid atau telah kedaluwarsa");
+            }
+            req.user = user;
+            // Kalo token valid, masukin ke limiter khusus token
+            authLimiter(req, res, next);
+        });
+    } catch (err) {
+        jwt.verify(token, JWT_SECRET, (err, user) => {
+            if (err) return sendStandardError(res, 403, "Anda tidak dapat mengakses resource ini");
+            req.user = user;
+            next();
+        });
+    }
 }
 
 // -----------------
