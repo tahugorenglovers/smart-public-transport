@@ -1,0 +1,110 @@
+<<<<<<< Updated upstream
+=======
+version: '3.9'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: smarttransit-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: smarttransit
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database:/docker-entrypoint-initdb.d
+
+  rabbitmq:
+    image: rabbitmq:management
+    container_name: smarttransit-rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: smarttransit-mqtt
+    restart: always
+    ports:
+      - "1883:1883"
+
+  nodered:
+    image: nodered/node-red
+    container_name: smarttransit-nodered
+    restart: always
+    ports:
+      - "1880:1880"
+    depends_on:
+      - mosquitto
+
+  gateway:
+    build: ./express-gateway
+    container_name: smarttransit-gateway
+    ports:
+      - "3000:3000"
+    depends_on:
+      - rabbitmq
+
+  oauth:
+    build: ./oauth-server
+    container_name: smarttransit-oauth
+    ports:
+      - "3002:3002"
+    depends_on:
+      - mysql
+
+  citizen-service:
+    build: ./php-citizen
+    container_name: smarttransit-citizen
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+      - rabbitmq
+
+  traffic-service:
+    build: ./php-traffic
+    container_name: smarttransit-traffic
+    ports:
+      - "8001:8001"
+    depends_on:
+      - mysql
+      - rabbitmq
+
+  environment-service:
+    build: ./php-environment
+    container_name: smarttransit-environment
+    ports:
+      - "8002:8002"
+    depends_on:
+      - mysql
+      - rabbitmq
+
+  python-ml:
+    build: ./python-ml-service
+    container_name: smarttransit-ml
+    ports:
+      - "5000:5000"
+    depends_on:
+      - rabbitmq
+
+  prometheus:
+    image: prom/prometheus
+    container_name: smarttransit-prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana
+    container_name: smarttransit-grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  mysql_data:
+>>>>>>> Stashed changes
