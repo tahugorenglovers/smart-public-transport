@@ -7,11 +7,13 @@ namespace App\Controllers;
 use App\Models\Ticket;
 use App\Services\RabbitMQPublisher;
 use App\Validators\TicketValidator;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
 
 class TicketController extends BaseController
 {
-    private Ticket             $ticket;
-    private RabbitMQPublisher  $publisher;
+    private Ticket            $ticket;
+    private RabbitMQPublisher $publisher;
 
     public function __construct()
     {
@@ -20,13 +22,14 @@ class TicketController extends BaseController
     }
 
     // POST /api/tickets
-    public function store(array $params, int $userId): void
+    public function store(Request $request, Response $response, array $args): Response
     {
-        $body       = $this->getBody();
+        $userId     = (int) $request->getAttribute('user_id');
+        $body       = $this->getBody($request);
         $validation = TicketValidator::validateStore($body);
 
         if (!$validation['valid']) {
-            $this->respondError(422, implode(', ', $validation['errors']));
+            return $this->respondError($response, 422, implode(', ', $validation['errors']));
         }
 
         $record = $this->ticket->create($userId, $validation['data']['route_id']);
@@ -38,59 +41,61 @@ class TicketController extends BaseController
             'route_id'    => $record['route_id'],
         ]);
 
-        $this->respond([
-            'ticket_id'   => $record['id'],
-            'ticket_code' => $record['ticket_code'],
-            'route_id'    => $record['route_id'],
-            'status'      => $record['status'],
-            'booking_time'=> $record['booking_time'],
+        return $this->respond($response, [
+            'ticket_id'    => $record['id'],
+            'ticket_code'  => $record['ticket_code'],
+            'route_id'     => $record['route_id'],
+            'status'       => $record['status'],
+            'booking_time' => $record['booking_time'],
         ], 201, 'Ticket booked successfully');
     }
 
     // GET /api/tickets
-    public function index(array $params, int $userId): void
+    public function index(Request $request, Response $response, array $args): Response
     {
-        $this->ticket->expireOldTickets();
+        $userId = (int) $request->getAttribute('user_id');
 
+        $this->ticket->expireOldTickets();
         $tickets = $this->ticket->findByUser($userId);
-        $this->respond($tickets, 200, 'Tickets retrieved');
+
+        return $this->respond($response, $tickets, 200, 'Tickets retrieved');
     }
 
     // GET /api/tickets/{id}
-    public function show(array $params, int $userId): void
+    public function show(Request $request, Response $response, array $args): Response
     {
-        $id     = (int) ($params['id'] ?? 0);
+        $userId = (int) $request->getAttribute('user_id');
+        $id     = (int) ($args['id'] ?? 0);
         $record = $this->ticket->findById($id, $userId);
 
         if (!$record) {
-            $this->respondError(404, 'Ticket not found');
+            return $this->respondError($response, 404, 'Ticket not found');
         }
 
-        $this->respond($record);
+        return $this->respond($response, $record);
     }
 
     // POST /api/tickets/{code}/scan
-    // Simulates QR scan
-    public function scan(array $params, int $userId): void
+    public function scan(Request $request, Response $response, array $args): Response
     {
-        $code   = $params['code'] ?? '';
+        $code   = $args['code'] ?? '';
         $record = $this->ticket->findByCode($code);
 
         if (!$record) {
-            $this->respondError(404, 'Ticket not found');
+            return $this->respondError($response, 404, 'Ticket not found');
         }
 
         if ($record['status'] === 'used') {
-            $this->respondError(409, 'Ticket has already been used');
+            return $this->respondError($response, 409, 'Ticket has already been used');
         }
 
         if ($record['status'] === 'expired') {
-            $this->respondError(410, 'Ticket has expired');
+            return $this->respondError($response, 410, 'Ticket has expired');
         }
 
         $this->ticket->updateStatus((int) $record['id'], 'used');
 
-        $this->respond([
+        return $this->respond($response, [
             'ticket_id'   => $record['id'],
             'ticket_code' => $record['ticket_code'],
             'status'      => 'used',
