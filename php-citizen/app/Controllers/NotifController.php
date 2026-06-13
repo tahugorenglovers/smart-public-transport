@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Models\Notification;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
 
 class NotifController extends BaseController
 {
@@ -16,22 +18,25 @@ class NotifController extends BaseController
     }
 
     // GET /api/notifications
-    public function index(array $params, int $userId): void
+    public function index(Request $request, Response $response, array $args): Response
     {
+        $userId  = (int) $request->getAttribute('user_id');
         $records = $this->notif->findByUser($userId);
-        $this->respond($records);
+
+        return $this->respond($response, $records);
     }
 
     // PATCH /api/notifications/{id}/read
-    public function markRead(array $params, int $userId): void
+    public function markRead(Request $request, Response $response, array $args): Response
     {
-        $id      = (int) ($params['id'] ?? 0);
+        $userId  = (int) $request->getAttribute('user_id');
+        $id      = (int) ($args['id'] ?? 0);
         $success = $this->notif->markAsRead($id, $userId);
 
         if (!$success) {
-            $this->respondError(404, 'Notification not found');
+            return $this->respondError($response, 404, 'Notification not found');
         }
 
-        $this->respond(['id' => $id, 'is_read' => true], 200, 'Marked as read');
+        return $this->respond($response, ['id' => $id, 'is_read' => true], 200, 'Marked as read');
     }
 }
