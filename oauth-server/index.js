@@ -1,23 +1,23 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import express, { json } from 'express';
-import mysql, { Types } from 'mysql2/promise';
+import express from 'express';
+import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { token } from 'morgan';
-import { use } from 'react';
+import morgan from 'morgan';
 
 const app = express();
 app.use(express.json());
+app.use(morgan('dev'));
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3002;
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
 // -------------------------------------
 // KONEKSI DATABASE MYSQL (smarttransit)
 // -------------------------------------
-const db = await mysql.createPool({
+const db = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
@@ -27,7 +27,7 @@ const db = await mysql.createPool({
 // -------------------------
 // Health Check OAuth Server
 // -------------------------
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
     try {
         await db.query('SELECT 1');
         return res.status(200).json({
@@ -37,9 +37,9 @@ app.get('/health', (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({
-            status: "UP",
-            code: 200,
-            database: "CONNECTED", 
+            status: "DOWN",
+            code: 500,
+            database: "DISCONNECTED", 
         });
     }
 });
@@ -96,7 +96,6 @@ app.post('/oauth/token', async (req, res) => {
             }
 
             const tokenData = generateOAuthResponse({
-                status: "success",
                 id: user.id,
                 name: user.name,
                 role: user.role || 'citizen',
@@ -108,7 +107,7 @@ app.post('/oauth/token', async (req, res) => {
         // Refresh Token Grant (perpanjang sesi login)
         if (grant_type === 'refresh_token') {
             if (!refresh_token) {
-                return res.status(400),json({
+                return res.status(400).json({
                     status: "error",
                     code: 400,
                     message: "Token refresh tidak ditemukan"
