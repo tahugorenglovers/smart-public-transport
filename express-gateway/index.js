@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import morgan from 'morgan';
 import mysql from 'mysql2/promise';
+import axios from 'axios';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -156,7 +157,7 @@ app.get('/health', async (req, res) => {
 const configureProxy = (targetUrl, serviceName) => ({
     target: targetUrl,
     changeOrigin: true,
-    onError: (err, req, res) => {
+    errorHandler: (err, req, res) => {
         sendStandardError(res, 502, `Bad Gateway. Layanan [${serviceName}] sedang tidak aktif`, serviceName);
     }
 });
@@ -174,6 +175,48 @@ app.use('/api/environment', authenticateToken, createProxyMiddleware(configurePr
 
 app.use('/predict', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
 app.use('/detect', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
+
+// callback abis oauth google
+app.get('/api/oauth/callback', async (req, res) => {
+    const { code } = req.query;
+
+    if (!code) {
+        return res.status(400).json({ 
+            status: "error", 
+            message: "Code dari Google tidak ditemukan" 
+        });
+    }
+
+    try {
+        const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
+            code,
+            client_id: process.env.GOOGLE_CLIENT_ID,
+            client_secret: process.env.GOOGLE_CLIENT_SECRET,
+            redirect_uri: 'http://localhost:3000/api/oauth/callback',
+            grant_type: 'authorization_code'
+        });
+
+        const { id_token } = tokenResponse.data;
+
+        const oauthServerResponse = await axios.post('http://localhost:3002/token', {
+            grant_type: 'google',
+            id_token: id_token
+        });
+
+        return res.json({
+            status: "success",
+            message: "Login Google Berhasil lewat API Gateway (Stateless Backend)",
+            data: oauthServerResponse.data
+        });
+
+    } catch (error) {
+        console.error(error.response?.data || error.message);
+        return res.status(500).json({
+            status: "error",
+            message: "Gagal memproses login Google di tingkat Gateway"
+        });
+    }
+});
 
 // -----------------------
 // SERVER RUNNING
