@@ -75,7 +75,7 @@ app.post('/oauth/token', async (req, res) => {
                 });
             }
 
-            const [rows] = await db.query('SELECT * FROM citizen_citizens WHERE email = ? OR nik = ?', [username, username]);
+            const [rows] = await db.query('SELECT * FROM citizen_users WHERE email = ? OR nik = ?', [username, username]);
             const user = rows[0];
 
             if (!user || !user.password_hash) {
@@ -98,8 +98,7 @@ app.post('/oauth/token', async (req, res) => {
             const tokenData = generateOAuthResponse({
                 id: user.id,
                 name: user.name,
-                role: user.role || 'citizen',
-                zone_id: user.zone_id
+                role: 'citizen'
             });
             res.json(tokenData);
         }
@@ -126,7 +125,7 @@ app.post('/oauth/token', async (req, res) => {
                     });
                 }
 
-                const [users] = await db.query('SELECT * FROM citizen_citizens WHERE id = ?', [storedToken.user_id]);
+                const [users] = await db.query('SELECT * FROM citizen_users WHERE id = ?', [storedToken.user_id]);
                 const user = users[0];
 
                 const tokenData = generateOAuthResponse({
