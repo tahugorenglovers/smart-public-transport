@@ -5,16 +5,16 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import morgan from 'morgan';
-import mysql from 'mysql2';
+import mysql from 'mysql2/promise';
 
 const app = express();
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // ----------------
 // KONEKSI DATABASE
 // ----------------
-const db = await mysql.createPool({
+const db = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
@@ -24,11 +24,11 @@ const db = await mysql.createPool({
 // ----------- 
 // URL SERVICE (portnya blum fix)
 // -----------
-const OAUTH_SERVICE_URL = process.env.OAUTH_SERVICE_URL;
-const CITIZEN_SERVICE_URL = process.env.CITIZEN_SERVICE_URL;
-const TRAFFIC_SERVICE_URL = process.env.TRAFFIC_SERVICE_URL;
-const ENV_SERVICE_URL = process.env.ENV_SERVICE_URL;
-const PYTHON_ML_URL = process.env.PYTHON_ML_URL;
+const OAUTH_SERVICE_URL = process.env.OAUTH_SERVICE_URL || 'http://localhost:3002';
+const CITIZEN_SERVICE_URL = process.env.CITIZEN_SERVICE_URL || 'http://localhost:8081';
+const TRAFFIC_SERVICE_URL = process.env.TRAFFIC_SERVICE_URL || 'http://localhost:8082';
+const ENV_SERVICE_URL = process.env.ENV_SERVICE_URL || 'http://localhost:8083';
+const PYTHON_ML_URL = process.env.PYTHON_ML_URL || 'http://localhost:5000';
 
 // ---------------
 // REQUEST LOGGING
@@ -66,7 +66,7 @@ const globalLimiter = rateLimit({
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    handler: (req, res) => sendStandardError(req, 429, "Terlalu banyak permintaan dari IP ini, coba lagi nanti")
+    handler: (req, res) => sendStandardError(res, 429, "Terlalu banyak permintaan dari IP ini, coba lagi nanti")
 });
 app.use(globalLimiter);
 
@@ -77,7 +77,7 @@ const authLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => req.headers.authorization || req.ip,
-    handler: (req, res) => sendStandardError(req, 429, "Terlalu banyak permintaan untuk token ini, coba lagi nanti")
+    handler: (req, res) => sendStandardError(res, 429, "Terlalu banyak permintaan untuk token ini, coba lagi nanti")
 });
 
 // ----------------
@@ -94,20 +94,17 @@ async function authenticateToken(req, res, next) {
     try {
         const [rows] = await db.query('SELECT id FROM oauth_token_blacklist WHERE token = ?', [token]);
         if (rows.length > 0) {
-            return sendStandardError(res, 401, "Token yang dimsukkan sudah di-blacklist");
+            return sendStandardError(res, 401, "Unauthorized. Token sudah di revoke");
         }
-        
+
         jwt.verify(token, JWT_SECRET, (err, user) => {
-            if (err) {
-                return sendStandardError(res, 403, "Token tidak valid atau telah kedaluwarsa");
-            }
+            if (err) return sendStandardError(res, 403, "Forbidden. Token yang dimasukkan tidak valid");
             req.user = user;
-            // Kalo token valid, masukin ke limiter khusus token
             authLimiter(req, res, next);
         });
     } catch (err) {
         jwt.verify(token, JWT_SECRET, (err, user) => {
-            if (err) return sendStandardError(res, 403, "Anda tidak dapat mengakses resource ini");
+            if (err) return sendStandardError(res, 403, "Forbidden.");
             req.user = user;
             next();
         });
