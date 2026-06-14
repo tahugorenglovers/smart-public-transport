@@ -116,31 +116,32 @@ app.post('/oauth/token', async (req, res) => {
             }
             
             try {
-                const decoded = jwt.verify(refresh_token, JWT_REFRESH_SECRET);
-                const [rows] = await db.query('SELECT * FROM citizen_users WHERE id = ?', [decoded.id]);
-                const user = rows[0];
+                const [rows] = await db.query('SELECT * FROM oauth_refresh_tokens WHERE refresh_token = ? AND revoked = FALSE AND expires_at > NOW()', [refresh_token]);
+                const storedToken = rows[0];
 
-                if (!user) {
+                if (!storedToken) {
                     return res.status(401).json({ 
                         status: "error",
                         code: 401,
-                        message: "User tidak ditemukan" 
+                        message: "Refresh token tidak valid, sudah kadaluwarsa, atau sudah direvoke" 
                     });
                 }
+
+                const [users] = await db.query('SELECT * FROM citizen_citizens WHERE id = ?', [storedToken.user_id]);
+                const user = users[0];
 
                 const tokenData = generateOAuthResponse({
                     status: "success", 
                     id: user.id, 
                     name: user.name, 
-                    role: user.role || 'citizen',
-                    zone_id: user.zone_id 
+                    role: user.role || 'citizen'
                 });
                 return res.json(tokenData);
             } catch (err) {
                 return res.status(401).json({ 
-                        status: "error",
-                        code: 401,
-                        message: "Token refesh tidak valid atau sudah kadaluwarsa" 
+                    status: "error",
+                    code: 401,
+                    message: "Token refesh tidak valid atau sudah kadaluwarsa" 
                 });
             }
         }
@@ -219,39 +220,41 @@ app.post('/oauth/introspect', (req, res) => {
 // POST /oauth/revoke
 // ------------------
 app.post('/oauth/revoke', async (req, res) => {
-    const { token } = req.body;
-
-    if (!token) {
-        return res.status(400).json({ 
-            status: "error",
-            code: 400,
-            message: "Token diperlukan, silakan masukkan token yang sesuai" 
-        });
-    }
+    const { token, refresh_token } = req.body;
 
     try {
-        const decoded = jwt.decode(token);
+        // klo dikirim access token, masukkan ke tabel blacklist
+        if (token) {
+            const decoded = jwt.decode(token);
+            const expiryDate = decoded && decoded.exp 
+                ? new Date(decoded.exp * 1000).toISOString().slice(0, 19).replace('T', ' ')
+                : new Date(Date.now() + 3600000).toISOString().slice(0, 19).replace('T', ' ');
 
-        // ubah exp time ke format DATETIME MySQL
-        const expiryDate = decoded && decoded.exp
-            ? new Date(decoded.exp * 1000).toISOString().slice(0, 19).replace('T', ' ')
-            : new Date(Date.now() + 3600000).toISOString().slice(0, 19).replace('T', ' ');
-    
-        await db.query('INSERT INTO oauth_token_blacklist (token, expired_at) VALUES (?, ?)', [token, expiryDate]);
+            await db.query(
+                'INSERT INTO oauth_token_blacklist (token, expired_at) VALUES (?, ?)',
+                [token, expiryDate]
+            );
+        }
+
+        // klo refresh token, ubah status 'revoked' jadi TRUE di tabel
+        if (refresh_token) {
+            await db.query(
+                'UPDATE oauth_refresh_tokens SET revoked = TRUE WHERE refresh_token = ?',
+                [refresh_token]
+            );
+        }
+
         return res.status(200).json({
             status: "success",
-            code: 200,
-            message: "Token sudah diblacklist dan di-revoke"
+            message: "Token sudah berhasil di-revoke"
         });
-    } catch (err) {
+    } catch (error) {
         return res.status(500).json({ 
-            status: "error", 
+            status: "error",
             code: 500,
-            message: "Gagal untuk me-revoke token, coba lagi nanti" 
+            message: "Proses revoke token gagal" 
         });
     }
-
-    
 });
 
 app.listen(PORT, () => {
