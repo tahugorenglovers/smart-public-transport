@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS bus_stops (
 );
 
 -- seed data
-INSERT INTO bus_stops (stop_name, latitude, longtitude) VALUES
+INSERT INTO bus_stops (stop_name, latitude, longitude) VALUES
 ('Terminal Cicaheum', -6.9022, 107.6558),
 ('Halte Pasar Induk', -6.9100, 107.6400),
 ('Halte Alun-alun', -6.9218, 107.6099),
