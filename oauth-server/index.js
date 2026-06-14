@@ -5,6 +5,8 @@ import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import morgan from 'morgan';
+import { OAuth2Client } from 'google-auth-library';
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const app = express();
 app.use(express.json());
@@ -61,7 +63,7 @@ function generateOAuthResponse(userPayload) {
 // -----------------
 // POST /oauth/token 
 // -----------------
-app.post('/oauth/token', async (req, res) => {
+app.post('/token', async (req, res) => {
     const { grant_type, username, password, refresh_token, client_id, client_secret } = req.body;
 
     try {
@@ -100,7 +102,17 @@ app.post('/oauth/token', async (req, res) => {
                 name: user.name,
                 role: 'citizen'
             });
-            res.json(tokenData);
+
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 7); // Set basi 7 hari ke depan 
+            const expiresAtFormatted = expiresAt.toISOString().slice(0, 19).replace('T', ' ');
+
+            await db.query(
+                'INSERT INTO oauth_refresh_tokens (user_id, refresh_token, expires_at) VALUES (?, ?, ?)',
+                [user.id, tokenData.refresh_token, expiresAtFormatted]
+            );
+
+            return res.json(tokenData);
         }
 
         // Refresh Token Grant (perpanjang sesi login)
@@ -172,6 +184,71 @@ app.post('/oauth/token', async (req, res) => {
             });
             return res.json(tokenData);
         }
+
+        // Google OAuth Grant (nuker Google id_token dengan JWT)
+        if (grant_type === 'google') {
+            const { id_token } = req.body;
+
+            if (!id_token) {
+                return res.status(400).json({ 
+                    status: "error",
+                    code: 400,
+                    message: "Google ID Token tidak ditemukan" 
+                });
+            }
+
+            try {
+                const ticket = await googleClient.verifyIdToken({
+                    idToken: id_token,
+                    audience: process.env.GOOGLE_CLIENT_ID, 
+                });
+                const payload = ticket.getPayload();
+                
+                const googleEmail = payload.email;
+                const googleName = payload.name;
+
+                let [rows] = await db.query('SELECT * FROM citizen_users WHERE email = ?', [googleEmail]);
+                let user = rows[0];
+
+                // klo belum ada, buat akun baru (Auto-Register)
+                if (!user) {
+                    const [insertResult] = await db.query(
+                        'INSERT INTO citizen_users (name, email, password_hash) VALUES (?, ?, ?)',
+                        [googleName, googleEmail, null] // password_hash null karena login pke Google
+                    );
+                    
+                    const [newUserRows] = await db.query('SELECT * FROM citizen_users WHERE id = ?', [insertResult.insertId]);
+                    user = newUserRows[0];
+                }
+
+                const tokenData = generateOAuthResponse({
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    role: 'citizen'
+                });
+
+                // save refresh token ke database biar bisa diperpanjang
+                const expiresAt = new Date();
+                expiresAt.setDate(expiresAt.getDate() + 7);
+                const expiresAtFormatted = expiresAt.toISOString().slice(0, 19).replace('T', ' ');
+
+                await db.query(
+                    'INSERT INTO oauth_refresh_tokens (user_id, refresh_token, expires_at) VALUES (?, ?, ?)',
+                    [user.id, tokenData.refresh_token, expiresAtFormatted]
+                );
+
+                return res.json(tokenData);
+
+            } catch (googleError) {
+                return res.status(401).json({
+                    status: "error",
+                    code: 401,
+                    message: "Google ID Token tidak valid atau sudah kadaluwarsa"
+                });
+            }
+        }
+
         return res.status(400).json({ 
             status: "error",
             code: 400,
@@ -189,7 +266,7 @@ app.post('/oauth/token', async (req, res) => {
 // ----------------------
 // POST /oauth/introspect
 // ----------------------
-app.post('/oauth/introspect', (req, res) => {
+app.post('/introspect', (req, res) => {
     const { token } = req.body;
 
     if (!token) {
@@ -217,7 +294,7 @@ app.post('/oauth/introspect', (req, res) => {
 // ------------------
 // POST /oauth/revoke
 // ------------------
-app.post('/oauth/revoke', async (req, res) => {
+app.post('/revoke', async (req, res) => {
     const { token, refresh_token } = req.body;
 
     try {
