@@ -129,3 +129,11 @@ CREATE TABLE oauth_token_blacklist (
     blacklisted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX(token) -- TAMBAHKAN INI: Paling krusial karena Gateway bakal nge-cek ini TIAP DETIK
 );
+
+CREATE TABLE oauth_clients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(100) NOT NULL UNIQUE,
+    client_secret VARCHAR(255) NOT NULL,
+    client_name VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
