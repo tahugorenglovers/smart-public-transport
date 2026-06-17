@@ -13,7 +13,7 @@ class RabbitMQPublisher
     private int    $port;
     private string $user;
     private string $pass;
-    private string $exchange = 'city.events';
+    private string $exchange = 'smarttransit';
 
     public function __construct()
     {

@@ -119,7 +119,7 @@ CREATE TABLE oauth_refresh_tokens (
     expires_at DATETIME NOT NULL,
     revoked BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX(refresh_token) -- TAMBAHKAN INI: Biar nyari refresh token pas perpanjang gak lemot
+    INDEX(refresh_token) -- Untuk nyari refresh token pas perpanjang gak lemot
 );
 
 CREATE TABLE oauth_token_blacklist (
@@ -127,7 +127,7 @@ CREATE TABLE oauth_token_blacklist (
     token VARCHAR(500) NOT NULL,
     expired_at DATETIME NOT NULL,
     blacklisted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX(token) -- TAMBAHKAN INI: Paling krusial karena Gateway bakal nge-cek ini TIAP DETIK
+    INDEX(token) -- untuk gateway ini TIAP DETIK
 );
 
 CREATE TABLE oauth_clients (

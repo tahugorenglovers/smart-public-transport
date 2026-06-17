@@ -215,15 +215,7 @@ database/seed.sql
 
 # Environment Variables
 
-Copy file:
-
-.env.example
-
-menjadi:
-
-.env
-
-Kemudian sesuaikan konfigurasi database dan service.
+Menggunakan .env.example dimana dengan Copy file: .env.example dan mengubah menjadi: .env bisa dipakai/disesuaikan untuk konfigurasi database dan semua service.
 
 ---
 
@@ -278,7 +270,3 @@ kubectl apply -f k8s/
 ```
 
 ---
-
-# License
-
-Academic Project - Universitas

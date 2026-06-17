@@ -2,21 +2,32 @@ FROM php:8.2-cli
 
 WORKDIR /app
 
-# Install dependencies
+# System dependencies & PHP extensions
+# (no ext-amqp needed: this service talks to RabbitMQ via the pure-PHP
+# php-amqplib composer package, not the amqp pecl extension)
 RUN apt-get update && apt-get install -y \
-    librabbitmq-dev \
-    && docker-php-ext-install pdo pdo_mysql \
-    && pecl install amqp \
-    && docker-php-ext-enable amqp \
-    && apt-get clean
+        unzip curl libzip-dev \
+    && docker-php-ext-install pdo pdo_mysql zip \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy semua file
+# Install Composer
+COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
+
+# Install PHP dependencies first so this layer is cached unless
+# composer.json/lock actually change
+COPY composer.json composer.lock* ./
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+
+# Copy application source (this includes consumer.php, which the
+# `environment-consumer` service in docker-compose.yml runs instead
+# of the HTTP server below, to drain the RabbitMQ anomaly queue)
 COPY . .
 
 EXPOSE 8002
 
-CMD ["php", "-S", "0.0.0.0:8000", "-t", "public"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8002/health || exit 1
 
-CMD ["php", "-S", "0.0.0.0:8002", "-t", "public"]
+# public/index.php doubles as the router script so the built-in
+# server dispatches every request, not just literal files.
+CMD ["php", "-S", "0.0.0.0:8002", "-t", "public", "public/index.php"]

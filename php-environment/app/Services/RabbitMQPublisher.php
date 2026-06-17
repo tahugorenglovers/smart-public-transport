@@ -20,7 +20,7 @@ class RabbitMQPublisher {
         try {
             $this->connection = new AMQPStreamConnection($host, $port, $user, $pass);
             $this->channel = $this->connection->channel();
-            $this->channel->exchange_declare('city.events', 'topic', false, true, false);
+            $this->channel->exchange_declare('smarttransit', 'topic', false, true, false);
         } catch (Exception $e) {
             $this->connection = null;
             $this->channel = null;
@@ -37,7 +37,7 @@ class RabbitMQPublisher {
                 json_encode($payload),
                 ['delivery_mode' => AMQPMessage::DELIVERY_MODE_PERSISTENT]
             );
-            $this->channel->basic_publish($msg, 'city.events', $routingKey);
+            $this->channel->basic_publish($msg, 'smarttransit', $routingKey);
             return true;
         } catch (Exception $e) {
             return false;

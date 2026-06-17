@@ -1,89 +1,150 @@
-version: '3.9'
-
 services:
   mysql:
     image: mysql:8.0
     container_name: smarttransit-mysql
-    restart: always
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: smarttransit
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-smarttransit}
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   rabbitmq:
     image: rabbitmq:management
     container_name: smarttransit-rabbitmq
-    restart: always
+    restart: unless-stopped
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   mosquitto:
     image: eclipse-mosquitto
     container_name: smarttransit-mqtt
-    restart: always
+    restart: unless-stopped
     ports:
       - "1883:1883"
+    volumes:
+      - ./iot/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./iot/mosquitto/data:/mosquitto/data
+      - ./iot/mosquitto/log:/mosquitto/log
 
   nodered:
     image: nodered/node-red
     container_name: smarttransit-nodered
-    restart: always
+    restart: unless-stopped
     ports:
       - "1880:1880"
+    volumes:
+      - nodered_data:/data
     depends_on:
       - mosquitto
 
   gateway:
     build: ./express-gateway
     container_name: smarttransit-gateway
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      PORT: 3000
     ports:
       - "3000:3000"
     depends_on:
-      - rabbitmq
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   oauth:
     build: ./oauth-server
     container_name: smarttransit-oauth
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      PORT: 3002
     ports:
       - "3002:3002"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
 
   citizen-service:
     build: ./php-citizen
     container_name: smarttransit-citizen
+    restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
       - "8000:8000"
     depends_on:
-      - mysql
-      - rabbitmq
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   traffic-service:
     build: ./php-traffic
     container_name: smarttransit-traffic
+    restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
       - "8001:8001"
     depends_on:
-      - mysql
-      - rabbitmq
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   environment-service:
     build: ./php-environment
     container_name: smarttransit-environment
+    restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
       - "8002:8002"
     depends_on:
-      - mysql
-      - rabbitmq
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  environment-consumer:
+    build: ./php-environment
+    container_name: smarttransit-environment-consumer
+    restart: unless-stopped
+    command: ["php", "consumer.php"]
+    env_file:
+      - ./.env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   python-ml:
     build: ./python-ml-service
     container_name: smarttransit-ml
+    restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
       - "5000:5000"
     depends_on:
@@ -92,16 +153,22 @@ services:
   prometheus:
     image: prom/prometheus
     container_name: smarttransit-prometheus
+    restart: unless-stopped
     ports:
       - "9090:9090"
 
   grafana:
     image: grafana/grafana
     container_name: smarttransit-grafana
+    restart: unless-stopped
     ports:
       - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
 
 volumes:
   mysql_data:
+  grafana_data:
+  nodered_data:

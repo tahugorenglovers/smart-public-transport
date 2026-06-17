@@ -21,9 +21,9 @@ class RabbitMQConsumer {
         $this->channel = $this->connection->channel();
         $this->alertModel = new Alert();
 
-        $this->channel->exchange_declare('city.events', 'topic', false, true, false);
+        $this->channel->exchange_declare('smarttransit', 'topic', false, true, false);
         $this->channel->queue_declare('env.anomaly.detected', false, true, false, false);
-        $this->channel->queue_bind('env.anomaly.detected', 'city.events', 'bus.anomaly.detected');
+        $this->channel->queue_bind('env.anomaly.detected', 'smarttransit', 'bus.anomaly.detected');
     }
 
     public function listen(): void {
