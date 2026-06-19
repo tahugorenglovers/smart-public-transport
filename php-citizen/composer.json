@@ -25,5 +25,8 @@
         "ignore": [
             "PKSA-y2cr-5h3j-g3ys"
         ]
+    },
+    "scripts": {
+        "consume:driver-behavior": "php consumers/driver_behavior_consumer.php"
     }
 }
