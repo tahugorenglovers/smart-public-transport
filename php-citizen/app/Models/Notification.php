@@ -38,4 +38,39 @@ class Notification
         $stmt->execute([':id' => $id, ':user_id' => $userId]);
         return $stmt->rowCount() > 0;
     }
+
+    /**
+     * Create a notification for a single user.
+     */
+    public function create(int $userId, string $title, string $message): array
+    {
+        $stmt = $this->db->prepare(
+            'INSERT INTO citizen_notifications (user_id, title, message)
+             VALUES (:user_id, :title, :message)'
+        );
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':title'   => $title,
+            ':message' => $message,
+        ]);
+
+        return ['id' => (int) $this->db->lastInsertId()];
+    }
+
+    /**
+     * Broadcast a notification to all registered citizens.
+     */
+    public function broadcastToAll(string $title, string $message): int
+    {
+        $stmt = $this->db->prepare(
+            'INSERT INTO citizen_notifications (user_id, title, message)
+             SELECT id, :title, :message FROM citizen_users'
+        );
+        $stmt->execute([
+            ':title'   => $title,
+            ':message' => $message,
+        ]);
+
+        return $stmt->rowCount();
+    }
 }
