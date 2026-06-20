@@ -137,3 +137,36 @@ CREATE TABLE oauth_clients (
     client_name VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ====================================
+-- DRIVER BEHAVIOR DETECTION TABLES
+-- (added by review: these existed only in
+-- php-traffic/database/migrations/006_*.sql and
+-- php-citizen/database/migration_driver_alerts.sql,
+-- which docker-compose never mounts/runs - moved here so they
+-- actually get created on `docker compose up`)
+-- ====================================
+
+CREATE TABLE traffic_driver_telemetry (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bus_id INT NOT NULL,
+    speed DOUBLE,
+    acceleration DOUBLE,
+    brake_force DOUBLE,
+    turn_rate DOUBLE,
+    vibration DOUBLE,
+    recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_bus_id (bus_id),
+    INDEX idx_recorded_at (recorded_at),
+    FOREIGN KEY (bus_id) REFERENCES traffic_buses(id) ON DELETE CASCADE
+);
+
+CREATE TABLE citizen_driver_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bus_id INT,
+    severity VARCHAR(20),
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_driver_alerts_bus_id (bus_id),
+    INDEX idx_driver_alerts_created_at (created_at)
+);

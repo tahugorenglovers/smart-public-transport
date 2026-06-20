@@ -5,6 +5,7 @@ import os
 import json
 import asyncio
 import pika
+import time
 
 app = FastAPI(title="Smart Transit - Python ML Service")
 
@@ -95,41 +96,58 @@ async def startup_event():
     loop.run_in_executor(None, start_rabbitmq_consumer)
 
 def start_rabbitmq_consumer():
-    try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=os.getenv('RABBITMQ_HOST', 'localhost')))
-        channel = connection.channel()
+    max_retries = 10
+    for attempt in range(1, max_retries + 1):
+        try:
+            connection = pika.BlockingConnection(pika.ConnectionParameters(host=os.getenv('RABBITMQ_HOST', 'localhost')))
+            channel = connection.channel()
 
-        channel.queue_declare(queue='driver.telemetry.updated', durable=True)
+            # NOTE: traffic-service publishes 'driver.telemetry.updated' to the
+            # 'smarttransit' topic exchange (see php-traffic/app/Config/RabbitMQ.php),
+            # not to the default exchange. A queue only receives messages from a
+            # topic exchange if it's explicitly bound to it - just declaring a
+            # queue with a matching name does nothing on its own.
+            channel.exchange_declare(exchange='smarttransit', exchange_type='topic', durable=True)
+            channel.queue_declare(queue='driver.telemetry.updated', durable=True)
+            channel.queue_bind(exchange='smarttransit', queue='driver.telemetry.updated', routing_key='driver.telemetry.updated')
 
-        def callback(ch, method, properties, body):
-            data = json.loads(body)
-            
-            speed = data.get("speed", 0)
-            acceleration = data.get("acceleration", 0)
-            brake_force = data.get("brake_force", 0)
-            turn_rate = data.get("turn_rate", 0)
-            vibration = data.get("vibration", 0)
-            bus_id = data.get("bus_id", 1)
+            def callback(ch, method, properties, body):
+                data = json.loads(body)
 
-            if os.path.exists(DRIVER_MODEL_PATH):
-                model = joblib.load(DRIVER_MODEL_PATH)
-                prediction = model.predict([[speed, acceleration, brake_force, turn_rate, vibration]])[0]
-                
-                if prediction == "dangerous":
-                    payload = {
-                        "bus_id": bus_id,
-                        "behavior": "dangerous",
-                        "severity": "high"
-                    }
-                    ch.basic_publish(
-                        exchange='',
-                        routing_key='driver.behavior.detected',
-                        body=json.dumps(payload)
-                    )
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+                speed = data.get("speed", 0)
+                acceleration = data.get("acceleration", 0)
+                brake_force = data.get("brake_force", 0)
+                turn_rate = data.get("turn_rate", 0)
+                vibration = data.get("vibration", 0)
+                bus_id = data.get("bus_id", 1)
 
-        channel.basic_consume(queue='driver.telemetry.updated', on_message_callback=callback)
-        print("[*] RabbitMQ Consumer started listening to driver.telemetry.updated...")
-        channel.start_consuming()
-    except Exception as e:
-        print(f"[!] Gagal menyambungkan ke RabbitMQ: {e}")
+                if os.path.exists(DRIVER_MODEL_PATH):
+                    model = joblib.load(DRIVER_MODEL_PATH)
+                    prediction = model.predict([[speed, acceleration, brake_force, turn_rate, vibration]])[0]
+
+                    # citizen-service's consumer treats both 'dangerous' and
+                    # 'aggressive' as alert-worthy, so publish for both.
+                    if prediction in ("dangerous", "aggressive"):
+                        payload = {
+                            "bus_id": bus_id,
+                            "behavior": str(prediction),
+                            "severity": "high" if prediction == "dangerous" else "medium"
+                        }
+                        # Publish through the same topic exchange the rest of the
+                        # platform uses, rather than the default exchange (which
+                        # only worked by coincidence if a queue happened to
+                        # already exist with this exact name).
+                        ch.basic_publish(
+                            exchange='smarttransit',
+                            routing_key='driver.behavior.detected',
+                            body=json.dumps(payload)
+                        )
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+
+            channel.basic_consume(queue='driver.telemetry.updated', on_message_callback=callback)
+            print("[*] RabbitMQ Consumer started listening to driver.telemetry.updated...")
+            channel.start_consuming()
+            break
+        except Exception as e:
+            print(f"[!] Gagal menyambungkan ke RabbitMQ (attempt {attempt}/{max_retries}): {e}")
+            time.sleep(5)

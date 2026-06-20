@@ -16,7 +16,7 @@ $dotenv->load();
 // Behaviors that should trigger an alert + notification
 const DANGEROUS_BEHAVIORS = ['aggressive', 'dangerous'];
 
-const EXCHANGE    = 'city.events';
+const EXCHANGE    = 'smarttransit';
 const QUEUE       = 'driver.behavior.detected';
 const ROUTING_KEY = 'driver.behavior.detected';
 

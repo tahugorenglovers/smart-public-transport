@@ -98,6 +98,24 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # Drains the `driver.behavior.detected` queue
+  # (consumers/driver_behavior_consumer.php) so detections from the ML
+  # service's driver-behavior model turn into stored alerts + citizen
+  # notifications. Reuses the citizen-service image, just overrides the
+  # command so it runs the long-lived CLI worker instead of the HTTP server.
+  citizen-driver-alert-consumer:
+    build: ./php-citizen
+    container_name: smarttransit-citizen-driver-alert-consumer
+    restart: unless-stopped
+    command: ["php", "consumers/driver_behavior_consumer.php"]
+    env_file:
+      - ./.env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   traffic-service:
     build: ./php-traffic
     container_name: smarttransit-traffic
@@ -148,7 +166,8 @@ services:
     ports:
       - "5000:5000"
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus
