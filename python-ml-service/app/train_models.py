@@ -1,6 +1,8 @@
 import pandas as pd
 import random
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
 import joblib
 import os
 
@@ -94,10 +96,61 @@ def train_anomaly_model():
     joblib.dump(model, 'app/models/anomaly_model.pkl')
     print("-> Sukses: 'app/models/anomaly_model.pkl' berhasil disimpan!")
 
+# 4. TRAINING MODEL 4: DRIVER BEHAVIOR DETECTION 
+def train_driver_behavior_model():
+    print("\nMenggenerate data (~1000 row) dan melatih Model 4 (Driver Behavior)...")
+    
+    rows = []
+    for _ in range(1000):
+        speed = random.randint(10, 110)         
+        acceleration = round(random.uniform(0.1, 8.0), 2)  
+        brake_force = round(random.uniform(0.1, 10.0), 2) 
+        turn_rate = random.randint(1, 45)       
+        vibration = round(random.uniform(0.0, 2.5), 2)    
+        
+        if speed > 80 or acceleration > 5.5 or brake_force > 7.5 or turn_rate > 35:
+            label = "dangerous"
+        elif speed > 65 or acceleration > 4.0 or brake_force > 5.5 or turn_rate > 25 or vibration > 1.5:
+            label = "aggressive"
+        elif speed > 40 or acceleration > 2.0 or brake_force > 3.0 or turn_rate > 12 or vibration > 0.6:
+            label = "normal"
+        else:
+            label = "safe"
+            
+        rows.append([speed, acceleration, brake_force, turn_rate, vibration, label])
+        
+    df = pd.DataFrame(rows, columns=['speed', 'acceleration', 'brake_force', 'turn_rate', 'vibration', 'label'])
+    
+    X = df[['speed', 'acceleration', 'brake_force', 'turn_rate', 'vibration']]
+    y = df['label']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+    y_pred = model.predict(X_test)
+    
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred, average='weighted')
+    rec = recall_score(y_test, y_pred, average='weighted')
+    cm = confusion_matrix(y_test, y_pred)
+    
+    print("\n=== HASIL EVALUASI MODEL DRIVER BEHAVIOR ===")
+    print(f"Accuracy  : {acc:.4f}")
+    print(f"Precision : {prec:.4f}")
+    print(f"Recall    : {rec:.4f}")
+    print("Confusion Matrix:")
+    print(cm)
+    print("============================================\n")
+    
+    joblib.dump(model, 'app/models/driver_behavior_model.pkl')
+    print("-> Sukses: 'app/models/driver_behavior_model.pkl' berhasil disimpan!")
 
 if __name__ == "__main__":
     print("=== Memulai Proses Training 3 Model ML ===")
     train_eta_model()
     train_passenger_model()
     train_anomaly_model()
+    train_driver_behavior_model()
     print("=== Semua Model Selesai Dilatih! ===")

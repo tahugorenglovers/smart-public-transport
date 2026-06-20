@@ -69,9 +69,13 @@ cd python-ml-service
 ```bash
 pip install -r requirements.txt
 ```
-3. Jalankan server FastAPI:
+3. Jalankan Training Model
+```bash
+python app/train_models.py
+```
+4. Jalankan server FastAPI:
 ```bash
 python -m uvicorn app.main:app --reload
 ```
-4. Buka Dokumentasi API (Swagger UI):
+5. Buka Dokumentasi API (Swagger UI):
 Akses URL berikut di browser untuk mencoba API: http://127.0.0.1:8000/docs
