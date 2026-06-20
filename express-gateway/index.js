@@ -26,9 +26,9 @@ const db = mysql.createPool({
 // URL SERVICE (portnya blum fix)
 // -----------
 const OAUTH_SERVICE_URL = process.env.OAUTH_SERVICE_URL || 'http://localhost:3002';
-const CITIZEN_SERVICE_URL = process.env.CITIZEN_SERVICE_URL || 'http://localhost:8081';
-const TRAFFIC_SERVICE_URL = process.env.TRAFFIC_SERVICE_URL || 'http://localhost:8082';
-const ENV_SERVICE_URL = process.env.ENV_SERVICE_URL || 'http://localhost:8083';
+const CITIZEN_SERVICE_URL = process.env.CITIZEN_SERVICE_URL || 'http://localhost:8000';
+const TRAFFIC_SERVICE_URL = process.env.TRAFFIC_SERVICE_URL || 'http://localhost:8001';
+const ENV_SERVICE_URL = process.env.ENV_SERVICE_URL || 'http://localhost:8002';
 const PYTHON_ML_URL = process.env.PYTHON_ML_URL || 'http://localhost:5000';
 
 // ---------------
@@ -67,6 +67,7 @@ const globalLimiter = rateLimit({
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { keyGenerator: false },
     handler: (req, res) => sendStandardError(res, 429, "Terlalu banyak permintaan dari IP ini, coba lagi nanti")
 });
 app.use(globalLimiter);
@@ -77,8 +78,20 @@ const authLimiter = rateLimit({
     max: 500,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { keyGenerator: false },
     keyGenerator: (req) => req.headers.authorization || req.ip,
     handler: (req, res) => sendStandardError(res, 429, "Terlalu banyak permintaan untuk token ini, coba lagi nanti")
+});
+
+// IoT Rate Limit (60 req/1 menit)
+const telemetryLimiter = rateLimit({
+    windowMs: 60 * 1000, 
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGenerator: false },
+    keyGenerator: (req) => req.headers.authorization || req.ip,
+    handler: (req, res) => sendStandardError(res, 429, "Spam Terdeteksi! Sensor mengirim data terlalu cepat", "traffic-service")
 });
 
 // ----------------
@@ -157,7 +170,7 @@ app.get('/health', async (req, res) => {
 const configureProxy = (targetUrl, serviceName) => ({
     target: targetUrl,
     changeOrigin: true,
-    errorHandler: (err, req, res) => {
+    onError: (err, req, res) => {
         sendStandardError(res, 502, `Bad Gateway. Layanan [${serviceName}] sedang tidak aktif`, serviceName);
     }
 });
@@ -166,6 +179,8 @@ const configureProxy = (targetUrl, serviceName) => ({
 app.use('/oauth', createProxyMiddleware(configureProxy(OAUTH_SERVICE_URL, "oauth-server")));
 
 // Protected
+app.post('/api/traffic/telemetry', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
+
 app.use('/api/citizens', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
 app.use('/api/reports', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
 app.use('/api/notifications', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
@@ -176,7 +191,7 @@ app.use('/api/environment', authenticateToken, createProxyMiddleware(configurePr
 app.use('/predict', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
 app.use('/detect', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
 
-// callback abis oauth google
+// callback oauth google
 app.get('/api/oauth/callback', async (req, res) => {
     const { code } = req.query;
 
