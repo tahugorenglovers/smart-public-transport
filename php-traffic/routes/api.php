@@ -4,6 +4,7 @@ use App\Controllers\BusController;
 use App\Controllers\LocationController;
 use App\Controllers\EtaController;
 use App\Controllers\RouteController;
+use App\Controllers\TelemetryController;
 use App\Middleware\AuthMiddleware;
 
 // Ambil method dan URI dari request
@@ -31,6 +32,12 @@ AuthMiddleware::handle();
 // POST /api/traffic/location ← dari Node-RED / IoT
 if ($uri === '/api/traffic/location' && $method === 'POST') {
     (new LocationController())->store();
+    exit;
+}
+
+// POST /api/traffic/telemetry ← data telemetri dari bus
+if ($uri === '/api/traffic/telemetry' && $method === 'POST') {
+    (new TelemetryController())->store();
     exit;
 }
 
