@@ -70,6 +70,7 @@ def detect_anomaly(data: AnomalyRequest):
 
 # --- MODEL 4: DRIVER BEHAVIOR DETECTION  ---
 class DriverBehaviorRequest(BaseModel):
+    bus_id: int
     speed: float
     acceleration: float
     brake_force: float
