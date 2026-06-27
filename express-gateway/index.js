@@ -86,7 +86,7 @@ const authLimiter = rateLimit({
 // IoT Rate Limit (60 req/1 menit)
 const telemetryLimiter = rateLimit({
     windowMs: 60 * 1000, 
-    max: 60,
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     validate: { keyGenerator: false },
@@ -175,19 +175,27 @@ const configureProxy = (targetUrl, serviceName) => ({
     }
 });
 
-// Publik
+// Rute Publik (OAuth)
 app.use('/oauth', createProxyMiddleware(configureProxy(OAUTH_SERVICE_URL, "oauth-server")));
 
-// Protected
+// Rute Protected (perlu token untuk dapat bisa diakses)
+// Rute Traffic IoT (Diarahkan ke TRAFFIC_SERVICE_URL)
+app.post('/api/traffic/location', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
 app.post('/api/traffic/telemetry', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
+app.use('/api/traffic', authenticateToken, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
 
+// Rute Environment IoT (Diarahkan ke ENV_SERVICE_URL)
+app.post('/api/environment/passenger', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
+app.post('/api/environment/temperature', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
+app.post('/api/environment/air', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
+app.use('/api/environment', authenticateToken, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
+
+// Rute Citizen (Diarahkan ke CITIZEN_SERVICE_URL)
 app.use('/api/citizens', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
 app.use('/api/reports', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
 app.use('/api/notifications', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
 
-app.use('/api/traffic', authenticateToken, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
-app.use('/api/environment', authenticateToken, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
-
+// Rute ML (Diarahkan ke PYTHON_ML_URL)
 app.use('/predict', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
 app.use('/detect', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
 
