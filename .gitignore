@@ -1,2 +1,5 @@
-.env
-/node_modules
+node_modules/
+.env"iot/mosquitto/data/mosquitto.db" 
+iot/mosquitto/data/mosquitto.db
+python-ml-service/app/__pycache__/
+python-ml-service/app/*.pyc

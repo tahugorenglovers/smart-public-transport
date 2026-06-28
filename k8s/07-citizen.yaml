@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: citizen-service
+  namespace: smarttransit
+spec:
+  selector:
+    app: citizen-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: citizen-service
+  namespace: smarttransit
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: citizen-service
+  template:
+    metadata:
+      labels:
+        app: citizen-service
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z mysql 3306; do echo "waiting for mysql..."; sleep 3; done']
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z rabbitmq 5672; do echo "waiting for rabbitmq..."; sleep 3; done']
+      containers:
+        - name: citizen-service
+          image: smarttransit-citizen-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: smarttransit-config
+            - secretRef:
+                name: smarttransit-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+# Consumer worker — no HTTP, no HPA, single replica
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: citizen-driver-alert-consumer
+  namespace: smarttransit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: citizen-driver-alert-consumer
+  template:
+    metadata:
+      labels:
+        app: citizen-driver-alert-consumer
+    spec:
+      # Wait for RabbitMQ to be ready before starting the consumer
+      initContainers:
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z rabbitmq 5672; do echo "waiting for rabbitmq..."; sleep 3; done']
+      containers:
+        - name: consumer
+          image: smarttransit-citizen-service:latest
+          imagePullPolicy: IfNotPresent
+          # Wrap in shell loop so a transient disconnect restarts the consumer
+          # without Kubernetes marking the pod as failed
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                echo "[consumer] starting driver_behavior_consumer..."
+                php consumers/driver_behavior_consumer.php || true
+                echo "[consumer] exited, restarting in 5s..."
+                sleep 5
+              done
+          envFrom:
+            - configMapRef:
+                name: smarttransit-config
+            - secretRef:
+                name: smarttransit-secrets
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: citizen-hpa
+  namespace: smarttransit
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: citizen-service
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

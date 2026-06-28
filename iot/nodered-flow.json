@@ -1,0 +1,397 @@
+[
+  {
+    "id": "tab_smarttransit",
+    "type": "tab",
+    "label": "SmartTransit IoT Bridge",
+    "disabled": false,
+    "info": "Bridges Wokwi MQTT sensors into the SmartTransit platform.\n\nTraffic sensors (Albi):\n  smarttransit/traffic/gps   \u2192 POST /internal/traffic/location\n  smarttransit/traffic/speed \u2192 (merged with GPS before POST)\n\nEnvironment sensors (Melva):\n  smarttransit/environment/passenger  \u2192 POST /internal/environment/passenger\n  smarttransit/environment/temperature \u2192 POST /internal/environment/temperature\n  smarttransit/environment/air         \u2192 POST /internal/environment/air"
+  },
+  {
+    "id": "mqtt_broker",
+    "type": "mqtt-broker",
+    "name": "Mosquitto (dosen server :1813)",
+    "broker": "103.147.92.135",
+    "port": "1813",
+    "clientid": "nodered-smarttransit-bridge",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true
+  },
+  {
+    "id": "comment_traffic",
+    "type": "comment",
+    "z": "tab_smarttransit",
+    "name": "\u2500\u2500 TRAFFIC (Albi) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "info": "",
+    "x": 200,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "mqtt_in_gps",
+    "type": "mqtt in",
+    "z": "tab_smarttransit",
+    "name": "MQTT: GPS",
+    "topic": "smarttransit/traffic/gps",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker",
+    "x": 120,
+    "y": 100,
+    "wires": [
+      [
+        "fn_store_gps"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_speed",
+    "type": "mqtt in",
+    "z": "tab_smarttransit",
+    "name": "MQTT: Speed",
+    "topic": "smarttransit/traffic/speed",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker",
+    "x": 120,
+    "y": 180,
+    "wires": [
+      [
+        "fn_store_speed"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_gps",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Store GPS",
+    "func": "var busId = msg.payload.bus_id;\nif (!busId) return null;\n\nflow.set('gps_' + busId, { latitude: msg.payload.latitude, longitude: msg.payload.longitude, ts: Date.now() });\n\nvar speed = flow.get('speed_' + busId);\nif (speed && (Date.now() - speed.ts) < 10000) {\n    return { payload: { bus_id: busId, latitude: msg.payload.latitude, longitude: msg.payload.longitude, speed: speed.value } };\n}\nreturn null;",
+    "outputs": 1,
+    "x": 320,
+    "y": 100,
+    "wires": [
+      [
+        "fn_build_traffic_request"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_speed",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Store Speed",
+    "func": "var busId = msg.payload.bus_id;\nif (!busId) return null;\n\nflow.set('speed_' + busId, { value: msg.payload.speed, ts: Date.now() });\n\nvar gps = flow.get('gps_' + busId);\nif (gps && (Date.now() - gps.ts) < 10000) {\n    return { payload: { bus_id: busId, latitude: gps.latitude, longitude: gps.longitude, speed: msg.payload.speed } };\n}\nreturn null;",
+    "outputs": 1,
+    "x": 320,
+    "y": 180,
+    "wires": [
+      [
+        "fn_build_traffic_request"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_traffic_request",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Build Traffic Request",
+    "func": "msg.method  = 'POST';\nmsg.url     = 'http://gateway:3000/internal/traffic/location';\nmsg.headers = { 'Content-Type': 'application/json' };\nnode.log('Traffic \u2192 ' + JSON.stringify(msg.payload));\nreturn msg;",
+    "outputs": 1,
+    "x": 540,
+    "y": 140,
+    "wires": [
+      [
+        "http_post_traffic"
+      ]
+    ]
+  },
+  {
+    "id": "http_post_traffic",
+    "type": "http request",
+    "z": "tab_smarttransit",
+    "name": "POST /internal/traffic/location",
+    "method": "use",
+    "ret": "obj",
+    "url": "http://103.147.92.135:3010/internal/traffic/location",
+    "x": 760,
+    "y": 140,
+    "wires": [
+      [
+        "fn_log_traffic"
+      ]
+    ]
+  },
+  {
+    "id": "fn_log_traffic",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Log",
+    "func": "if (msg.statusCode === 201) node.log('[Traffic OK] ' + JSON.stringify(msg.payload));\nelse node.warn('[Traffic ERROR] ' + msg.statusCode + ' ' + JSON.stringify(msg.payload));\nreturn msg;",
+    "outputs": 1,
+    "x": 960,
+    "y": 140,
+    "wires": [
+      [
+        "debug_traffic"
+      ]
+    ]
+  },
+  {
+    "id": "debug_traffic",
+    "type": "debug",
+    "z": "tab_smarttransit",
+    "name": "Traffic Debug",
+    "active": true,
+    "tosidebar": true,
+    "tostatus": true,
+    "complete": "payload",
+    "statusVal": "payload.status",
+    "statusType": "msg",
+    "x": 1120,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "comment_env",
+    "type": "comment",
+    "z": "tab_smarttransit",
+    "name": "\u2500\u2500 ENVIRONMENT (Melva) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "info": "",
+    "x": 200,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "mqtt_in_passenger",
+    "type": "mqtt in",
+    "z": "tab_smarttransit",
+    "name": "MQTT: Passenger",
+    "topic": "smarttransit/environment/passenger",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker",
+    "x": 130,
+    "y": 340,
+    "wires": [
+      [
+        "fn_build_passenger_request"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_temperature",
+    "type": "mqtt in",
+    "z": "tab_smarttransit",
+    "name": "MQTT: Temperature",
+    "topic": "smarttransit/environment/temperature",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker",
+    "x": 130,
+    "y": 420,
+    "wires": [
+      [
+        "fn_build_temperature_request"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_air",
+    "type": "mqtt in",
+    "z": "tab_smarttransit",
+    "name": "MQTT: Air Quality",
+    "topic": "smarttransit/environment/air",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker",
+    "x": 130,
+    "y": 500,
+    "wires": [
+      [
+        "fn_build_air_request"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_passenger_request",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Build Passenger Request",
+    "func": "if (!msg.payload.bus_id || msg.payload.passenger_count === undefined) return null;\nmsg.method  = 'POST';\nmsg.url     = 'http://gateway:3000/internal/environment/passenger';\nmsg.headers = { 'Content-Type': 'application/json' };\nnode.log('Passenger \u2192 ' + JSON.stringify(msg.payload));\nreturn msg;",
+    "outputs": 1,
+    "x": 360,
+    "y": 340,
+    "wires": [
+      [
+        "http_post_env"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_temperature_request",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Build Temperature Request",
+    "func": "if (!msg.payload.bus_id || msg.payload.temperature === undefined) return null;\nmsg.method  = 'POST';\nmsg.url     = 'http://gateway:3000/internal/environment/temperature';\nmsg.headers = { 'Content-Type': 'application/json' };\nnode.log('Temperature \u2192 ' + JSON.stringify(msg.payload));\nreturn msg;",
+    "outputs": 1,
+    "x": 360,
+    "y": 420,
+    "wires": [
+      [
+        "http_post_env"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_air_request",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Build Air Quality Request",
+    "func": "if (!msg.payload.bus_id || msg.payload.co2_ppm === undefined) return null;\nmsg.method  = 'POST';\nmsg.url     = 'http://gateway:3000/internal/environment/air';\nmsg.headers = { 'Content-Type': 'application/json' };\nnode.log('Air \u2192 ' + JSON.stringify(msg.payload));\nreturn msg;",
+    "outputs": 1,
+    "x": 360,
+    "y": 500,
+    "wires": [
+      [
+        "http_post_env"
+      ]
+    ]
+  },
+  {
+    "id": "http_post_env",
+    "type": "http request",
+    "z": "tab_smarttransit",
+    "name": "POST to Environment Service",
+    "method": "use",
+    "ret": "obj",
+    "url": "http://103.147.92.135:3010/internal/environment/sensor",
+    "x": 620,
+    "y": 420,
+    "wires": [
+      [
+        "fn_log_env"
+      ]
+    ]
+  },
+  {
+    "id": "fn_log_env",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Log",
+    "func": "if (msg.statusCode === 201) node.log('[Env OK] ' + JSON.stringify(msg.payload));\nelse node.warn('[Env ERROR] ' + msg.statusCode + ' ' + JSON.stringify(msg.payload));\nreturn msg;",
+    "outputs": 1,
+    "x": 820,
+    "y": 420,
+    "wires": [
+      [
+        "debug_env"
+      ]
+    ]
+  },
+  {
+    "id": "debug_env",
+    "type": "debug",
+    "z": "tab_smarttransit",
+    "name": "Environment Debug",
+    "active": true,
+    "tosidebar": true,
+    "tostatus": true,
+    "complete": "payload",
+    "statusVal": "payload.status",
+    "statusType": "msg",
+    "x": 1000,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "comment_driver",
+    "type": "comment",
+    "z": "tab_smarttransit",
+    "name": "\u2500\u2500 DRIVER BEHAVIOR (Paruk) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "info": "",
+    "x": 200,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "mqtt_in_driver_telemetry",
+    "type": "mqtt in",
+    "z": "tab_smarttransit",
+    "name": "MQTT: Driver Telemetry",
+    "topic": "smarttransit/driver/telemetry",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker",
+    "x": 140,
+    "y": 460,
+    "wires": [
+      [
+        "fn_build_telemetry_request"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_telemetry_request",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Build Telemetry Request",
+    "func": "// Validate required fields\nvar p = msg.payload;\nif (!p.bus_id || p.speed === undefined || p.acceleration === undefined ||\n    p.brake_force === undefined || p.turn_rate === undefined || p.vibration === undefined) {\n    node.warn('Incomplete telemetry payload, skipping: ' + JSON.stringify(p));\n    return null;\n}\nmsg.method  = 'POST';\nmsg.url     = 'http://gateway:3000/internal/traffic/telemetry';\nmsg.headers = { 'Content-Type': 'application/json' };\nnode.log('Driver telemetry \u2192 bus_id=' + p.bus_id + ' speed=' + p.speed);\nreturn msg;",
+    "outputs": 1,
+    "x": 370,
+    "y": 460,
+    "wires": [
+      [
+        "http_post_telemetry"
+      ]
+    ]
+  },
+  {
+    "id": "http_post_telemetry",
+    "type": "http request",
+    "z": "tab_smarttransit",
+    "name": "POST /internal/traffic/telemetry",
+    "method": "use",
+    "ret": "obj",
+    "url": "http://103.147.92.135:3010/internal/traffic/telemetry",
+    "x": 610,
+    "y": 460,
+    "wires": [
+      [
+        "fn_log_telemetry"
+      ]
+    ]
+  },
+  {
+    "id": "fn_log_telemetry",
+    "type": "function",
+    "z": "tab_smarttransit",
+    "name": "Log",
+    "func": "if (msg.statusCode === 201) {\n    node.log('[Driver OK] Telemetry saved, RabbitMQ event published');\n} else {\n    node.warn('[Driver ERROR] ' + msg.statusCode + ' ' + JSON.stringify(msg.payload));\n}\nreturn msg;",
+    "outputs": 1,
+    "x": 820,
+    "y": 460,
+    "wires": [
+      [
+        "debug_driver"
+      ]
+    ]
+  },
+  {
+    "id": "debug_driver",
+    "type": "debug",
+    "z": "tab_smarttransit",
+    "name": "Driver Debug",
+    "active": true,
+    "tosidebar": true,
+    "tostatus": true,
+    "complete": "payload",
+    "statusVal": "payload.status",
+    "statusType": "msg",
+    "x": 990,
+    "y": 460,
+    "wires": []
+  }
+]

@@ -1,107 +1,186 @@
-version: '3.9'
-
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: smarttransit-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-smarttransit}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
-mysql:
-image: mysql:8.0
-container_name: smarttransit-mysql
-restart: always
-environment:
-MYSQL_ROOT_PASSWORD: root
-MYSQL_DATABASE: smarttransit
-ports:
-- "3306:3306"
+  rabbitmq:
+    image: rabbitmq:management
+    container_name: smarttransit-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15612:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: smarttransit-mqtt
+    restart: unless-stopped
+    ports:
+      - "1813:1883"
+    volumes:
+      - ./iot/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./iot/mosquitto/data:/mosquitto/data
+      - ./iot/mosquitto/log:/mosquitto/log
+
+  nodered:
+    image: nodered/node-red
+    container_name: smarttransit-nodered
+    restart: unless-stopped
+    ports:
+      - "1810:1880"
+    volumes:
+      - nodered_data:/data
+    depends_on:
+      - mosquitto
+
+  gateway:
+    build: ./express-gateway
+    container_name: smarttransit-gateway
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      PORT: 3000
+    ports:
+      - "3010:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  oauth:
+    build: ./oauth-server
+    container_name: smarttransit-oauth
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      PORT: 3002
+    ports:
+      - "3012:3002"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  citizen-service:
+    build: ./php-citizen
+    container_name: smarttransit-citizen
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "8010:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Drains the `driver.behavior.detected` queue
+  # (consumers/driver_behavior_consumer.php) so detections from the ML
+  # service's driver-behavior model turn into stored alerts + citizen
+  # notifications. Reuses the citizen-service image, just overrides the
+  # command so it runs the long-lived CLI worker instead of the HTTP server.
+  citizen-driver-alert-consumer:
+    build: ./php-citizen
+    container_name: smarttransit-citizen-driver-alert-consumer
+    restart: unless-stopped
+    command: ["php", "consumers/driver_behavior_consumer.php"]
+    env_file:
+      - ./.env
+    healthcheck:
+      disable: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  traffic-service:
+    build: ./php-traffic
+    container_name: smarttransit-traffic
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "8011:8001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  environment-service:
+    build: ./php-environment
+    container_name: smarttransit-environment
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "8012:8002"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Drains the `bus.anomaly.detected` queue (RabbitMQConsumer.php) so anomaly
+  # events published by the ML service actually get turned into env_alerts rows.
+  # Also subscribes to environment.updated (published by PassengerController
+  # when a combined passenger+temperature payload is POSTed) so future
+  # consumers can react to crowded+hot conditions alongside driver behaviour.
+  # Reuses the environment-service image, just overrides the command so it
+  # runs the long-lived CLI worker instead of the HTTP server.
+  environment-consumer:
+    build: ./php-environment
+    container_name: smarttransit-environment-consumer
+    restart: unless-stopped
+    command: ["php", "consumer.php"]
+    env_file:
+      - ./.env
+    healthcheck:
+      disable: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  python-ml:
+    build: ./python-ml-service
+    container_name: smarttransit-ml
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "5010:5000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+
 volumes:
-- mysql_data:/var/lib/mysql
-
-rabbitmq:
-image: rabbitmq:management
-container_name: smarttransit-rabbitmq
-restart: always
-ports:
-- "5672:5672"
-- "15672:15672"
-
-mosquitto:
-image: eclipse-mosquitto
-container_name: smarttransit-mqtt
-restart: always
-ports:
-- "1883:1883"
-
-nodered:
-image: nodered/node-red
-container_name: smarttransit-nodered
-restart: always
-ports:
-- "1880:1880"
-depends_on:
-- mosquitto
-
-gateway:
-build: ./express-gateway
-container_name: smarttransit-gateway
-ports:
-- "3000:3000"
-depends_on:
-- rabbitmq
-
-oauth:
-build: ./oauth-server
-container_name: smarttransit-oauth
-ports:
-- "3002:3002"
-depends_on:
-- mysql
-
-citizen-service:
-build: ./php-citizen
-container_name: smarttransit-citizen
-ports:
-- "8000:8000"
-depends_on:
-- mysql
-- rabbitmq
-
-traffic-service:
-build: ./php-traffic
-container_name: smarttransit-traffic
-ports:
-- "8001:8001"
-depends_on:
-- mysql
-- rabbitmq
-
-environment-service:
-build: ./php-environment
-container_name: smarttransit-environment
-ports:
-- "8002:8002"
-depends_on:
-- mysql
-- rabbitmq
-
-python-ml:
-build: ./python-ml-service
-container_name: smarttransit-ml
-ports:
-- "5000:5000"
-depends_on:
-- rabbitmq
-
-prometheus:
-image: prom/prometheus
-container_name: smarttransit-prometheus
-ports:
-- "9090:9090"
-
-grafana:
-image: grafana/grafana
-container_name: smarttransit-grafana
-ports:
-- "3001:3000"
-depends_on:
-- prometheus
-
-volumes:
-mysql_data:
+  mysql_data:
+  nodered_data:

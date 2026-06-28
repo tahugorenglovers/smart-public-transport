@@ -82,6 +82,16 @@ CREATE TABLE traffic_eta_predictions (
     FOREIGN KEY(stop_id) REFERENCES bus_stops(id)
 );
 
+CREATE TABLE env_air_quality_readings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bus_id INT,
+    co2_ppm INT,
+    recorded_at DATETIME,
+    INDEX idx_air_bus_id (bus_id),
+    INDEX idx_air_recorded_at (recorded_at),
+    FOREIGN KEY(bus_id) REFERENCES traffic_buses(id) ON DELETE CASCADE
+);
+
 CREATE TABLE env_passenger_readings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     bus_id INT,
@@ -106,4 +116,67 @@ CREATE TABLE env_alerts (
     description TEXT,
     created_at DATETIME,
     FOREIGN KEY(bus_id) REFERENCES traffic_buses(id)
+);
+
+-- ====================================
+-- OAUTH SERVICE TABLES (OPTIMIZED)
+-- ====================================
+
+CREATE TABLE oauth_refresh_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    refresh_token VARCHAR(500) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX(refresh_token) -- Untuk nyari refresh token pas perpanjang gak lemot
+);
+
+CREATE TABLE oauth_token_blacklist (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token VARCHAR(500) NOT NULL,
+    expired_at DATETIME NOT NULL,
+    blacklisted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX(token) -- untuk gateway ini TIAP DETIK
+);
+
+CREATE TABLE oauth_clients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(100) NOT NULL UNIQUE,
+    client_secret VARCHAR(255) NOT NULL,
+    client_name VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ====================================
+-- DRIVER BEHAVIOR DETECTION TABLES
+-- (added by review: these existed only in
+-- php-traffic/database/migrations/006_*.sql and
+-- php-citizen/database/migration_driver_alerts.sql,
+-- which docker-compose never mounts/runs - moved here so they
+-- actually get created on `docker compose up`)
+-- ====================================
+
+CREATE TABLE traffic_driver_telemetry (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bus_id INT NOT NULL,
+    speed DOUBLE,
+    acceleration DOUBLE,
+    brake_force DOUBLE,
+    turn_rate DOUBLE,
+    vibration DOUBLE,
+    recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_bus_id (bus_id),
+    INDEX idx_recorded_at (recorded_at),
+    FOREIGN KEY (bus_id) REFERENCES traffic_buses(id) ON DELETE CASCADE
+);
+
+CREATE TABLE citizen_driver_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bus_id INT,
+    severity VARCHAR(20),
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_driver_alerts_bus_id (bus_id),
+    INDEX idx_driver_alerts_created_at (created_at)
 );
