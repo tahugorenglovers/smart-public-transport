@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth
+  namespace: smarttransit
+spec:
+  selector:
+    app: oauth
+  ports:
+    - port: 3002
+      targetPort: 3002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth
+  namespace: smarttransit
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: oauth
+  template:
+    metadata:
+      labels:
+        app: oauth
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z mysql 3306; do echo "waiting for mysql..."; sleep 3; done']
+      containers:
+        - name: oauth
+          image: smarttransit-oauth:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - configMapRef:
+                name: smarttransit-config
+            - secretRef:
+                name: smarttransit-secrets
+          env:
+            - name: PORT
+              value: "3002"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3002
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: oauth-hpa
+  namespace: smarttransit
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: oauth
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

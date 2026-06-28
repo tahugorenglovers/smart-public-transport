@@ -8,7 +8,7 @@ $dotenv->safeLoad();
 function getDB(): PDO {
     $host = $_ENV['DB_HOST'] ?? 'mysql';
     $port = $_ENV['DB_PORT'] ?? '3306';
-    $name = $_ENV['DB_NAME'] ?? 'smart_transport';
+    $name = $_ENV['DB_NAME'] ?? 'smarttransit';
     $user = $_ENV['DB_USER'] ?? 'root';
     $pass = $_ENV['DB_PASS'] ?? 'rootpass';
 

@@ -1,0 +1,1459 @@
+{
+  "info": {
+    "_postman_id": "1c7ae1d1-e18a-4044-8f5e-3419e099dbba",
+    "name": "Smart Public Transport",
+    "description": "Koleksi endpoint lengkap Smart Public Transport Platform.\n\n**Setup:**\n\n1. Set {{baseUrl}} = [http://localhost:3010](http://localhost:3010) (lokal) atau http://:3010 (server)\n    \n2. Set {{oauthUrl}} = [http://localhost:3012](http://localhost:3012) (lokal) atau http://:3012 (server)\n    \n3. Jalankan 'S2: Step 1 - Citizen Login' dulu → token otomatis tersimpan ke {{token}}\n    \n4. Semua request yang perlu auth sudah pakai {{token}} secara otomatis\n    \n\n**Catatan path penting:**\n\n- Citizen reports: /api/reports (BUKAN /api/citizen/reports)\n    \n- Citizen notifications: /api/notifications\n    \n- ML prediction: /predict/traffic (BUKAN /api/ml/predict/traffic)\n    \n- ML anomaly: /detect/anomaly",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "49024600",
+    "_collection_link": "https://go.postman.co/collection/49024600-1c7ae1d1-e18a-4044-8f5e-3419e099dbba?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "OAuth & Auth",
+      "item": [
+        {
+          "name": "Login (Get Token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) {",
+                  "    pm.collectionVariables.set('token', json.access_token);",
+                  "    console.log('Token saved:', json.access_token.substring(0,30) + '...');",
+                  "}",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has access_token', () => pm.expect(json.access_token).to.exist);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"password\",\n  \"username\": \"test@test.com\",\n  \"password\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{oauthUrl}}/token",
+              "host": [
+                "{{oauthUrl}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "description": "Login dengan akun test. Token otomatis tersimpan ke {{token}} via post-response script."
+          },
+          "response": []
+        },
+        {
+          "name": "Health Check (OAuth)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{oauthUrl}}/health",
+              "host": [
+                "{{oauthUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Introspect Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{oauthUrl}}/introspect",
+              "host": [
+                "{{oauthUrl}}"
+              ],
+              "path": [
+                "introspect"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{oauthUrl}}/revoke",
+              "host": [
+                "{{oauthUrl}}"
+              ],
+              "path": [
+                "revoke"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Login dan manajemen token"
+    },
+    {
+      "name": "API Gateway",
+      "item": [
+        {
+          "name": "Gateway Health (All Upstreams)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Cek health gateway + semua upstream sekaligus. Gunakan untuk demo S4."
+          },
+          "response": []
+        }
+      ],
+      "description": "Health check gateway"
+    },
+    {
+      "name": "Citizen Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Reports",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports"
+              ]
+            },
+            "description": "GET /api/reports → citizen-service"
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Report (S2 Demo)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"keterlambatan\",\n  \"description\": \"Bus sangat terlambat lebih dari 30 menit\",\n  \"stop_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports"
+              ]
+            },
+            "description": "POST /api/reports. Setelah simpan, publish event ke RabbitMQ. Gunakan untuk demo S2."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Report by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Notifications",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "notifications"
+              ]
+            },
+            "description": "GET /api/notifications. Lihat notifikasi setelah S6 alert flow berjalan."
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Notification Read",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/1/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                "1",
+                "read"
+              ]
+            },
+            "description": "PATCH /api/notifications/{id}/read"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Tickets",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tickets"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Book Ticket",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"route_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tickets"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Reports, notifications, tickets via /api/reports, /api/notifications, /api/tickets"
+    },
+    {
+      "name": "Traffic Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bus Locations (Real-time)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "current"
+              ]
+            },
+            "description": "Posisi real-time semua bus"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Routes",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/routes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "routes"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get ETA",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/eta/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "eta",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post Telemetry (S1/S6 Demo)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"speed\": 72.0,\n  \"acceleration\": 4.5,\n  \"brake_force\": 8.2,\n  \"turn_rate\": 25.0,\n  \"vibration\": 0.9\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/telemetry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "telemetry"
+              ]
+            },
+            "description": "Simpan telemetri + publish driver.telemetry.updated ke RabbitMQ → ML classifies → alert."
+          },
+          "response": []
+        },
+        {
+          "name": "Post Location (Internal IoT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"latitude\": -6.9021,\n  \"longitude\": 107.6057,\n  \"speed\": 45.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/internal/traffic/location",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "internal",
+                "traffic",
+                "location"
+              ]
+            },
+            "description": "Route internal untuk Node-RED, tanpa JWT."
+          },
+          "response": []
+        }
+      ],
+      "description": "Lokasi bus, rute, ETA, telemetri via /api/traffic"
+    },
+    {
+      "name": "Environment Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/environment/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "environment",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post Passenger Count",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"passenger_count\": 42\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/environment/passenger",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "environment",
+                "passenger"
+              ]
+            },
+            "description": "Alert jika passenger_count > 40"
+          },
+          "response": []
+        },
+        {
+          "name": "Post Temperature",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"temperature\": 33.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/environment/temperature",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "environment",
+                "temperature"
+              ]
+            },
+            "description": "Alert jika temperature > 32°C"
+          },
+          "response": []
+        },
+        {
+          "name": "Post Air Quality (CO2)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"co2_ppm\": 1150\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/environment/air",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "environment",
+                "air"
+              ]
+            },
+            "description": "Alert jika co2_ppm > 1000"
+          },
+          "response": []
+        },
+        {
+          "name": "Post Combined (Melva)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"passenger_count\": 45,\n  \"temperature\": 34.2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/environment/passenger",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "environment",
+                "passenger"
+              ]
+            },
+            "description": "Payload gabungan passenger+temperature, publish environment.updated"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Environment Alerts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/environment/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "environment",
+                "alerts"
+              ]
+            },
+            "description": "Daftar semua alert lingkungan"
+          },
+          "response": []
+        }
+      ],
+      "description": "Passenger, suhu, CO2, alerts via /api/environment"
+    },
+    {
+      "name": "ML Service",
+      "item": [
+        {
+          "name": "Health Check (Direct)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5010/health",
+              "protocol": "http",
+              "host": [
+                "localhost"
+              ],
+              "port": "5010",
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Direct ke ML service, bypass gateway"
+          },
+          "response": []
+        },
+        {
+          "name": "Predict Traffic / Congestion (S3 Demo)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"route_id\": 2,\n  \"hour\": 17,\n  \"day_of_week\": 5,\n  \"current_speed\": 8.0,\n  \"vehicle_count\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/predict/traffic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predict",
+                "traffic"
+              ]
+            },
+            "description": "POST /predict/traffic → gateway rate limit → ML → congestion level. Gunakan untuk demo S3."
+          },
+          "response": []
+        },
+        {
+          "name": "Predict ETA",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hour\": 8,\n  \"day_of_week\": 1,\n  \"traffic_level\": 70,\n  \"distance_to_stop\": 5.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/predict/eta",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predict",
+                "eta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Predict Passenger",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hour\": 8,\n  \"day_of_week\": 1,\n  \"route_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/predict/passenger",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predict",
+                "passenger"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detect Anomaly",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"speed\": 0,\n  \"stop_duration\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/detect/anomaly",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "detect",
+                "anomaly"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Predict Driver Behavior",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"speed\": 72.0,\n  \"acceleration\": 4.5,\n  \"brake_force\": 8.2,\n  \"turn_rate\": 25.0,\n  \"vibration\": 0.9\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/predict/driver-behavior",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predict",
+                "driver-behavior"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Direct: Predict Traffic",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"route_id\": 1,\n  \"hour\": 8,\n  \"day_of_week\": 1,\n  \"current_speed\": 15.0,\n  \"vehicle_count\": 45\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5010/predict/traffic",
+              "protocol": "http",
+              "host": [
+                "localhost"
+              ],
+              "port": "5010",
+              "path": [
+                "predict",
+                "traffic"
+              ]
+            },
+            "description": "Langsung ke ML, bypass gateway"
+          },
+          "response": []
+        },
+        {
+          "name": "Direct: Driver Behavior",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"speed\": 72.0,\n  \"acceleration\": 4.5,\n  \"brake_force\": 8.2,\n  \"turn_rate\": 25.0,\n  \"vibration\": 0.9\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:5010/predict/driver-behavior",
+              "protocol": "http",
+              "host": [
+                "localhost"
+              ],
+              "port": "5010",
+              "path": [
+                "predict",
+                "driver-behavior"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Prediksi via /predict/... dan /detect/..."
+    },
+    {
+      "name": "Demo Scenarios",
+      "item": [
+        {
+          "name": "S1: IoT Telemetry Ingestion",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"speed\": 85.0,\n  \"acceleration\": 5.5,\n  \"brake_force\": 9.0,\n  \"turn_rate\": 30.0,\n  \"vibration\": 1.2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/telemetry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "telemetry"
+              ]
+            },
+            "description": "S1: POST telemetry → traffic-service → RabbitMQ driver.telemetry.updated → ML → citizen alert.\nCek: docker compose logs citizen-driver-alert-consumer"
+          },
+          "response": []
+        },
+        {
+          "name": "S2: Step 1 - Citizen Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) pm.collectionVariables.set('token', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"password\",\n  \"username\": \"test@test.com\",\n  \"password\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{oauthUrl}}/token",
+              "host": [
+                "{{oauthUrl}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "description": "S2 langkah 1: dapatkan JWT token"
+          },
+          "response": []
+        },
+        {
+          "name": "S2: Step 2 - Submit Report",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"keamanan\",\n  \"description\": \"Supir mengemudi berbahaya dan ugal-ugalan\",\n  \"stop_id\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports"
+              ]
+            },
+            "description": "S2 langkah 2: POST /api/reports dengan JWT → simpan ke DB → RabbitMQ event"
+          },
+          "response": []
+        },
+        {
+          "name": "S3: ML Prediction + Rate Limit",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"route_id\": 2,\n  \"hour\": 17,\n  \"day_of_week\": 5,\n  \"current_speed\": 8.0,\n  \"vehicle_count\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/predict/traffic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "predict",
+                "traffic"
+              ]
+            },
+            "description": "S3: Kirim 10x berturut-turut cepat → lihat rate limit 429. Gateway → ML → response."
+          },
+          "response": []
+        },
+        {
+          "name": "S6: Trigger Anomaly Alert",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bus_id\": 1,\n  \"speed\": 110.0,\n  \"acceleration\": 7.5,\n  \"brake_force\": 9.8,\n  \"turn_rate\": 45.0,\n  \"vibration\": 3.2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/traffic/telemetry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "traffic",
+                "telemetry"
+              ]
+            },
+            "description": "S6: Nilai sensor ekstrem → traffic-service → RabbitMQ → ML prediksi 'dangerous' → RabbitMQ → citizen consumer → alert + notifikasi.\nVerifikasi: docker compose logs citizen-driver-alert-consumer --tail=5"
+          },
+          "response": []
+        }
+      ],
+      "description": "Request siap pakai untuk setiap skenario demo S1–S6"
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3010",
+      "type": "string"
+    },
+    {
+      "key": "oauthUrl",
+      "value": "http://localhost:3012",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

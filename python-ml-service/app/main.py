@@ -49,6 +49,52 @@ def predict_passenger(data: PassengerRequest):
         return {"crowd_prediction": str(prediction[0])}
     return {"crowd_prediction": "LOW"}
 
+# --- /predict/traffic (S3 Demo Scenario) ---
+# The spec requires POST /predict/traffic for the S3 demo.
+# This endpoint takes current traffic conditions and predicts
+# the congestion level (LOW / MEDIUM / HIGH / CRITICAL).
+# Uses the same features as the ETA model which was trained on
+# traffic_level, hour, and distance data.
+class TrafficPredictionRequest(BaseModel):
+    route_id: int
+    hour: int
+    day_of_week: int
+    current_speed: float          # km/h — lower = more congested
+    vehicle_count: int            # number of vehicles on route
+
+@app.post("/predict/traffic")
+def predict_traffic(data: TrafficPredictionRequest):
+    # Derive a traffic_level score (0-100) from current conditions
+    # so we can reuse the trained ETA model's traffic_level feature
+    speed_factor   = max(0, min(100, int((1 - data.current_speed / 80) * 100)))
+    vehicle_factor = min(100, data.vehicle_count * 2)
+    traffic_level  = int((speed_factor + vehicle_factor) / 2)
+
+    # Predict ETA using existing model (traffic_level drives the output)
+    eta_minutes = 10  # default if model not trained yet
+    if os.path.exists(ETA_MODEL_PATH):
+        model      = joblib.load(ETA_MODEL_PATH)
+        prediction = model.predict([[data.hour, data.day_of_week, traffic_level, 5.0]])
+        eta_minutes = int(prediction[0])
+
+    # Map traffic_level to a human-readable congestion label
+    if traffic_level >= 75:
+        congestion = "CRITICAL"
+    elif traffic_level >= 50:
+        congestion = "HIGH"
+    elif traffic_level >= 25:
+        congestion = "MEDIUM"
+    else:
+        congestion = "LOW"
+
+    return {
+        "route_id":        data.route_id,
+        "congestion_level": congestion,
+        "traffic_score":   traffic_level,
+        "estimated_delay": eta_minutes,
+        "recommendation":  "Gunakan rute alternatif" if traffic_level >= 50 else "Rute aman dilalui"
+    }
+
 # --- MODEL 3: ANOMALY DETECTION ---
 class AnomalyRequest(BaseModel):
     bus_id: int
@@ -70,7 +116,6 @@ def detect_anomaly(data: AnomalyRequest):
 
 # --- MODEL 4: DRIVER BEHAVIOR DETECTION  ---
 class DriverBehaviorRequest(BaseModel):
-    bus_id: int
     speed: float
     acceleration: float
     brake_force: float

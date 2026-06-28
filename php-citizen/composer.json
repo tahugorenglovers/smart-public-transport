@@ -27,7 +27,6 @@
         ]
     },
     "scripts": {
-        "consume:driver-behavior": "php consumers/driver_behavior_consumer.php",
-        "consume:environment-alert": "php consumers/environment_alert_consumer.php"
+        "consume:driver-behavior": "php consumers/driver_behavior_consumer.php"
     }
 }

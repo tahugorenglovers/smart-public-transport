@@ -11,52 +11,53 @@ use PhpAmqpLib\Message\AMQPMessage;
 
 // Load env
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
-$dotenv->load();
+$dotenv->safeLoad();
 
+// Behaviors that should trigger an alert + notification
 const DANGEROUS_BEHAVIORS = ['aggressive', 'dangerous'];
 
-const EXCHANGE             = 'smarttransit';
-const QUEUE_DRIVER         = 'driver.behavior.detected';
-const ROUTING_KEY_DRIVER   = 'driver.behavior.detected';
+const EXCHANGE    = 'smarttransit';
+const QUEUE       = 'driver.behavior.detected';
+const ROUTING_KEY = 'driver.behavior.detected';
 
-function buildDriverMessage(int $busId, string $behavior): string
+function buildAlertMessage(int $busId, string $behavior): string
 {
-    $label = ucfirst($behavior);
+    $label = ucfirst($behavior); // Aggressive / Dangerous
     return "Bus {$busId} terdeteksi mengemudi {$label}";
 }
 
-function handleDriverEvent(array $event): void
+function handleEvent(array $event): void
 {
     $busId    = (int) ($event['bus_id'] ?? 0);
     $behavior = strtolower((string) ($event['behavior'] ?? ''));
     $severity = (string) ($event['severity'] ?? 'unknown');
 
-    echo "[Driver Consumer] bus_id={$busId}, behavior={$behavior}, severity={$severity}\n";
+    echo "[Consumer] Received event: bus_id={$busId}, behavior={$behavior}, severity={$severity}\n";
 
     if (!in_array($behavior, DANGEROUS_BEHAVIORS, true)) {
-        echo "[Driver Consumer] Behavior '{$behavior}' is safe, skipping.\n";
+        echo "[Consumer] Behavior '{$behavior}' is not dangerous, skipping.\n";
         return;
     }
 
     if ($busId <= 0) {
-        echo "[Driver Consumer] Invalid bus_id, skipping.\n";
+        echo "[Consumer] Invalid bus_id, skipping.\n";
         return;
     }
 
-    $message = buildDriverMessage($busId, $behavior);
+    $message = buildAlertMessage($busId, $behavior);
 
     // 1. Store alert
     $alertModel = new DriverAlert();
     $alert      = $alertModel->create($busId, $severity, $message);
-    echo "[Driver Consumer] Alert stored with id={$alert['id']}\n";
+    echo "[Consumer] Alert stored with id={$alert['id']}\n";
 
     // 2. Broadcast notification to all citizens
     $notifModel = new Notification();
     $count      = $notifModel->broadcastToAll('Safety Alert', $message);
-    echo "[Driver Consumer] Notification broadcasted to {$count} users\n";
+    echo "[Consumer] Notification broadcasted to {$count} users\n";
 }
 
-function startDriverConsumer(): void
+function startConsumer(): void
 {
     $host = $_ENV['RABBITMQ_HOST'] ?? 'rabbitmq';
     $port = (int) ($_ENV['RABBITMQ_PORT'] ?? 5672);
@@ -66,28 +67,34 @@ function startDriverConsumer(): void
     $connection = new AMQPStreamConnection($host, $port, $user, $pass);
     $channel    = $connection->channel();
 
+    // Declare exchange (idempotent, must match publisher's config)
     $channel->exchange_declare(EXCHANGE, 'topic', false, true, false);
-    $channel->queue_declare(QUEUE_DRIVER, false, true, false, false);
-    $channel->queue_bind(QUEUE_DRIVER, EXCHANGE, ROUTING_KEY_DRIVER);
+
+    // Declare queue and bind to routing key
+    $channel->queue_declare(QUEUE, false, true, false, false);
+    $channel->queue_bind(QUEUE, EXCHANGE, ROUTING_KEY);
 
     $callback = function (AMQPMessage $msg) use ($channel) {
         try {
             $event = json_decode($msg->getBody(), true);
+
             if (!is_array($event)) {
                 throw new \RuntimeException('Invalid JSON payload');
             }
-            handleDriverEvent($event);
+
+            handleEvent($event);
             $channel->basic_ack($msg->getDeliveryTag());
         } catch (\Throwable $e) {
-            echo '[Driver Consumer] Error: ' . $e->getMessage() . "\n";
+            echo '[Consumer] Error processing message: ' . $e->getMessage() . "\n";
+            // Reject and don't requeue malformed messages
             $channel->basic_reject($msg->getDeliveryTag(), false);
         }
     };
 
-    $channel->basic_qos(0, 1, false);
-    $channel->basic_consume(QUEUE_DRIVER, '', false, false, false, false, $callback);
+    $channel->basic_qos(0, 1, false); // process one message at a time
+    $channel->basic_consume(QUEUE, '', false, false, false, false, $callback);
 
-    echo "[Driver Consumer] Listening on '" . QUEUE_DRIVER . "'...\n";
+    echo "[Consumer] Listening on '" . QUEUE . "' (exchange: " . EXCHANGE . ")...\n";
 
     while ($channel->is_consuming()) {
         $channel->wait();
@@ -102,11 +109,11 @@ $attempt    = 0;
 
 while ($attempt < $maxRetries) {
     try {
-        startDriverConsumer();
+        startConsumer();
         break;
     } catch (\Exception $e) {
         $attempt++;
-        echo "[Driver Consumer] Connection failed ({$attempt}/{$maxRetries}): " . $e->getMessage() . "\n";
+        echo "[Consumer] Connection failed ({$attempt}/{$maxRetries}): " . $e->getMessage() . "\n";
         sleep(5);
     }
 }

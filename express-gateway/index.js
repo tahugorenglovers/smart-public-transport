@@ -86,13 +86,68 @@ const authLimiter = rateLimit({
 // IoT Rate Limit (60 req/1 menit)
 const telemetryLimiter = rateLimit({
     windowMs: 60 * 1000, 
-    max: 100,
+    max: 60,
     standardHeaders: true,
     legacyHeaders: false,
     validate: { keyGenerator: false },
     keyGenerator: (req) => req.headers.authorization || req.ip,
     handler: (req, res) => sendStandardError(res, 429, "Spam Terdeteksi! Sensor mengirim data terlalu cepat", "traffic-service")
 });
+
+// -------------------------
+// INTERNAL IoT ROUTE
+// Node-RED runs inside the Docker network and calls this directly.
+// Traffic data from sensors is not user-authenticated — it comes from
+// trusted internal services, so JWT is not required here.
+// Rate-limited to 120 req/min (one bus every 3-5 seconds * many buses).
+// -------------------------
+const iotLocationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    validate: { keyGenerator: false },
+    keyGenerator: (req) => req.ip,
+    handler: (req, res) => sendStandardError(res, 429, "IoT rate limit exceeded", "gateway")
+});
+
+app.post('/internal/traffic/location', iotLocationLimiter, createProxyMiddleware({
+    target: TRAFFIC_SERVICE_URL,
+    changeOrigin: true,
+    pathRewrite: { '^/internal/traffic/location': '/api/traffic/location' },
+    on: {
+        error: (err, req, res) => sendStandardError(res, 502, "Traffic service unreachable", "gateway")
+    }
+}));
+
+app.post('/internal/traffic/telemetry', iotLocationLimiter, createProxyMiddleware({
+    target: TRAFFIC_SERVICE_URL,
+    changeOrigin: true,
+    pathRewrite: { '^/internal/traffic/telemetry': '/api/traffic/telemetry' },
+    on: {
+        error: (err, req, res) => sendStandardError(res, 502, "Traffic service unreachable", "gateway")
+    }
+}));
+
+// Internal IoT routes for environment sensors (called by Node-RED, no JWT)
+app.post('/internal/environment/passenger', iotLocationLimiter, createProxyMiddleware({
+    target: ENV_SERVICE_URL,
+    changeOrigin: true,
+    pathRewrite: { '^/internal/environment/passenger': '/api/environment/passenger' },
+    on: { error: (err, req, res) => sendStandardError(res, 502, "Environment service unreachable", "gateway") }
+}));
+
+app.post('/internal/environment/temperature', iotLocationLimiter, createProxyMiddleware({
+    target: ENV_SERVICE_URL,
+    changeOrigin: true,
+    pathRewrite: { '^/internal/environment/temperature': '/api/environment/temperature' },
+    on: { error: (err, req, res) => sendStandardError(res, 502, "Environment service unreachable", "gateway") }
+}));
+
+app.post('/internal/environment/air', iotLocationLimiter, createProxyMiddleware({
+    target: ENV_SERVICE_URL,
+    changeOrigin: true,
+    pathRewrite: { '^/internal/environment/air': '/api/environment/air' },
+    on: { error: (err, req, res) => sendStandardError(res, 502, "Environment service unreachable", "gateway") }
+}));
 
 // ----------------
 // JWT VERIFICATION
@@ -164,40 +219,72 @@ app.get('/health', async (req, res) => {
     });
 });
 
-// -------------
-// ROUTING PROXY
-// -------------
-const configureProxy = (targetUrl, serviceName) => ({
-    target: targetUrl,
-    changeOrigin: true,
-    onError: (err, req, res) => {
-        sendStandardError(res, 502, `Bad Gateway. Layanan [${serviceName}] sedang tidak aktif`, serviceName);
-    }
+// -------------------------------------------------------------------
+// RATE LIMIT — ML predictions (10 req/menit per token untuk demo S3)
+// -------------------------------------------------------------------
+const mlLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGenerator: false },
+    keyGenerator: (req) => req.headers.authorization || req.ip,
+    handler: (req, res) => sendStandardError(res, 429, "Rate limit ML terlampaui. Maksimal 10 prediksi per menit.", "python-ml-service")
 });
 
-// Rute Publik (OAuth)
-app.use('/oauth', createProxyMiddleware(configureProxy(OAUTH_SERVICE_URL, "oauth-server")));
+// -----------------------------------------------------------------------
+// ROUTING PROXY
+//
+// PENTING — HPM v3 path stripping:
+// Jika pakai app.use('/prefix', hpm(...)), Express STRIP prefix dari req.url
+// sebelum HPM menerima request → upstream menerima path salah → 404/405.
+//
+// Fix: pakai `pathFilter` di dalam config HPM dan mount di app.use() tanpa path.
+// Express tidak strip apapun, HPM menerima full URL, upstream dapat path yang benar.
+// -----------------------------------------------------------------------
 
-// Rute Protected (perlu token untuk dapat bisa diakses)
-// Rute Traffic IoT (Diarahkan ke TRAFFIC_SERVICE_URL)
-app.post('/api/traffic/location', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
-app.post('/api/traffic/telemetry', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
-app.use('/api/traffic', authenticateToken, createProxyMiddleware(configureProxy(TRAFFIC_SERVICE_URL, "traffic-service")));
+const makeProxy = (pathFilter, target, serviceName, ...extraMiddleware) =>
+    app.use(
+        authenticateToken,
+        ...extraMiddleware,
+        createProxyMiddleware({
+            pathFilter,
+            target,
+            changeOrigin: true,
+            on: {
+                error: (err, req, res) =>
+                    sendStandardError(res, 502, `Bad Gateway. Layanan [${serviceName}] sedang tidak aktif`, serviceName)
+            }
+        })
+    );
 
-// Rute Environment IoT (Diarahkan ke ENV_SERVICE_URL)
-app.post('/api/environment/passenger', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
-app.post('/api/environment/temperature', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
-app.post('/api/environment/air', authenticateToken, telemetryLimiter, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
-app.use('/api/environment', authenticateToken, createProxyMiddleware(configureProxy(ENV_SERVICE_URL, "environment-service")));
+// ── Public: OAuth
+// oauth-server daftarkan route sebagai /token /introspect /revoke (tanpa prefix /oauth).
+// app.use('/oauth', ...) di sini justru BENAR karena kita INGIN Express strip '/oauth'
+// supaya upstream menerima '/token', '/introspect', '/revoke'.
+app.use('/oauth', createProxyMiddleware({
+    target: OAUTH_SERVICE_URL,
+    changeOrigin: true,
+    on: { error: (err, req, res) => sendStandardError(res, 502, "OAuth server tidak aktif", "oauth-server") }
+}));
 
-// Rute Citizen (Diarahkan ke CITIZEN_SERVICE_URL)
-app.use('/api/citizens', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
-app.use('/api/reports', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
-app.use('/api/notifications', authenticateToken, createProxyMiddleware(configureProxy(CITIZEN_SERVICE_URL, "citizen-service")));
+// ── Protected: semua pakai pathFilter (Express tidak strip path) ──
 
-// Rute ML (Diarahkan ke PYTHON_ML_URL)
-app.use('/predict', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
-app.use('/detect', authenticateToken, createProxyMiddleware(configureProxy(PYTHON_ML_URL, "python-ml-service")));
+// Citizen service — tickets, reports, notifications, citizens
+makeProxy(
+    ['/api/citizens', '/api/reports', '/api/notifications', '/api/tickets'],
+    CITIZEN_SERVICE_URL, "citizen-service"
+);
+
+// Traffic service — telemetry punya rate limit sendiri, sisanya normal
+makeProxy('/api/traffic/telemetry', TRAFFIC_SERVICE_URL, "traffic-service", telemetryLimiter);
+makeProxy('/api/traffic',           TRAFFIC_SERVICE_URL, "traffic-service");
+
+// Environment service
+makeProxy('/api/environment', ENV_SERVICE_URL, "environment-service");
+
+// Python ML service — rate limited 10/menit untuk demo S3
+makeProxy(['/predict', '/detect'], PYTHON_ML_URL, "python-ml-service", mlLimiter);
 
 // callback oauth google
 app.get('/api/oauth/callback', async (req, res) => {

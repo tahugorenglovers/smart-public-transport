@@ -11,9 +11,11 @@ use App\Controllers\TicketController;
 use App\Controllers\ReportController;
 use App\Controllers\NotifController;
 
-// Load .env
+// Load .env if present (local dev). In Docker, variables are already
+// injected by docker-compose env_file so no .env file exists on disk —
+// safeLoad() silently skips the file instead of throwing an exception.
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
-$dotenv->load();
+$dotenv->safeLoad();
 
 // Create app
 $app = AppFactory::create();

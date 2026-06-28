@@ -82,6 +82,16 @@ CREATE TABLE traffic_eta_predictions (
     FOREIGN KEY(stop_id) REFERENCES bus_stops(id)
 );
 
+CREATE TABLE env_air_quality_readings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bus_id INT,
+    co2_ppm INT,
+    recorded_at DATETIME,
+    INDEX idx_air_bus_id (bus_id),
+    INDEX idx_air_recorded_at (recorded_at),
+    FOREIGN KEY(bus_id) REFERENCES traffic_buses(id) ON DELETE CASCADE
+);
+
 CREATE TABLE env_passenger_readings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     bus_id INT,

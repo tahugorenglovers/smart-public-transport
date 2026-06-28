@@ -23,23 +23,20 @@ if ($uri === '/health' && $method === 'GET') {
     exit;
 }
 
-// Semua route di bawah butuh JWT
-AuthMiddleware::handle();
-
-// Traffic Routes
-
-
-// POST /api/traffic/location ← dari Node-RED / IoT
+// POST /api/traffic/location dari Node-RED / IoT (no JWT - internal network)
 if ($uri === '/api/traffic/location' && $method === 'POST') {
     (new LocationController())->store();
     exit;
 }
 
-// POST /api/traffic/telemetry ← data telemetri dari bus
+// POST /api/traffic/telemetry dari Node-RED / IoT (no JWT - internal network)
 if ($uri === '/api/traffic/telemetry' && $method === 'POST') {
     (new TelemetryController())->store();
     exit;
 }
+
+// Semua route di bawah butuh JWT
+AuthMiddleware::handle();
 
 // GET /api/traffic/current ← posisi realtime semua bus
 if ($uri === '/api/traffic/current' && $method === 'GET') {

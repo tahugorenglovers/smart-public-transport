@@ -7,7 +7,7 @@ WORKDIR /app
 # php-amqplib composer package, not the amqp pecl extension)
 RUN apt-get update && apt-get install -y \
         unzip curl libzip-dev \
-    && docker-php-ext-install pdo pdo_mysql zip \
+    && docker-php-ext-install pdo pdo_mysql zip sockets \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer

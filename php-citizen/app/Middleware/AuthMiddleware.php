@@ -26,7 +26,10 @@ class AuthMiddleware
 
         try {
             $decoded = JWT::decode($token, new Key($secret, 'HS256'));
-            return (int) ($decoded->sub ?? $decoded->user_id ?? 0) ?: null;
+            // oauth-server signs the token with { id, name, role } — not 'sub'.
+            // Support all three field names so the service works with every
+            // grant type (password, google, client_credentials).
+            return (int) ($decoded->sub ?? $decoded->user_id ?? $decoded->id ?? 0) ?: null;
         } catch (\Exception $e) {
             return null;
         }

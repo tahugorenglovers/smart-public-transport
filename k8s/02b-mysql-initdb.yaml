@@ -1,0 +1,581 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-sql
+  namespace: smarttransit
+data:
+  01-schema.sql: |
+    CREATE DATABASE IF NOT EXISTS smarttransit;
+    USE smarttransit;
+    
+    CREATE TABLE citizen_users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        nik VARCHAR(20) UNIQUE,
+        name VARCHAR(100),
+        email VARCHAR(100),
+        password_hash VARCHAR(255),
+        phone VARCHAR(20),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE citizen_tickets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        route_id INT,
+        ticket_code VARCHAR(50),
+        booking_time DATETIME,
+        status ENUM('active','used','expired'),
+        FOREIGN KEY(user_id) REFERENCES citizen_users(id)
+    );
+    
+    CREATE TABLE citizen_reports (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        category VARCHAR(50),
+        description TEXT,
+        stop_id INT,
+        status ENUM('pending','processing','resolved'),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE citizen_notifications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        title VARCHAR(255),
+        message TEXT,
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE traffic_routes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        route_name VARCHAR(100),
+        start_point VARCHAR(100),
+        end_point VARCHAR(100)
+    );
+    
+    CREATE TABLE traffic_buses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        plate_number VARCHAR(20),
+        route_id INT,
+        status ENUM('active','maintenance','offline'),
+        FOREIGN KEY(route_id) REFERENCES traffic_routes(id)
+    );
+    
+    CREATE TABLE bus_stops (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        stop_name VARCHAR(100),
+        latitude DOUBLE,
+        longitude DOUBLE
+    );
+    
+    CREATE TABLE traffic_bus_locations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        latitude DOUBLE,
+        longitude DOUBLE,
+        speed DOUBLE,
+        recorded_at DATETIME,
+        FOREIGN KEY(bus_id) REFERENCES traffic_buses(id)
+    );
+    
+    CREATE TABLE traffic_eta_predictions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        stop_id INT,
+        eta_minutes INT,
+        predicted_at DATETIME,
+        FOREIGN KEY(bus_id) REFERENCES traffic_buses(id),
+        FOREIGN KEY(stop_id) REFERENCES bus_stops(id)
+    );
+    
+    CREATE TABLE env_air_quality_readings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        co2_ppm INT,
+        recorded_at DATETIME,
+        INDEX idx_air_bus_id (bus_id),
+        INDEX idx_air_recorded_at (recorded_at),
+        FOREIGN KEY(bus_id) REFERENCES traffic_buses(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE env_passenger_readings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        passenger_count INT,
+        recorded_at DATETIME,
+        FOREIGN KEY(bus_id) REFERENCES traffic_buses(id)
+    );
+    
+    CREATE TABLE env_temperature_readings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        temperature DOUBLE,
+        recorded_at DATETIME,
+        FOREIGN KEY(bus_id) REFERENCES traffic_buses(id)
+    );
+    
+    CREATE TABLE env_alerts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        alert_type VARCHAR(50),
+        severity VARCHAR(20),
+        description TEXT,
+        created_at DATETIME,
+        FOREIGN KEY(bus_id) REFERENCES traffic_buses(id)
+    );
+    
+    -- ====================================
+    -- OAUTH SERVICE TABLES (OPTIMIZED)
+    -- ====================================
+    
+    CREATE TABLE oauth_refresh_tokens (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        refresh_token VARCHAR(500) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        revoked BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX(refresh_token) -- Untuk nyari refresh token pas perpanjang gak lemot
+    );
+    
+    CREATE TABLE oauth_token_blacklist (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        token VARCHAR(500) NOT NULL,
+        expired_at DATETIME NOT NULL,
+        blacklisted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX(token) -- untuk gateway ini TIAP DETIK
+    );
+    
+    CREATE TABLE oauth_clients (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id VARCHAR(100) NOT NULL UNIQUE,
+        client_secret VARCHAR(255) NOT NULL,
+        client_name VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- ====================================
+    -- DRIVER BEHAVIOR DETECTION TABLES
+    -- (added by review: these existed only in
+    -- php-traffic/database/migrations/006_*.sql and
+    -- php-citizen/database/migration_driver_alerts.sql,
+    -- which docker-compose never mounts/runs - moved here so they
+    -- actually get created on `docker compose up`)
+    -- ====================================
+    
+    CREATE TABLE traffic_driver_telemetry (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT NOT NULL,
+        speed DOUBLE,
+        acceleration DOUBLE,
+        brake_force DOUBLE,
+        turn_rate DOUBLE,
+        vibration DOUBLE,
+        recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_bus_id (bus_id),
+        INDEX idx_recorded_at (recorded_at),
+        FOREIGN KEY (bus_id) REFERENCES traffic_buses(id) ON DELETE CASCADE
+    );
+    
+    CREATE TABLE citizen_driver_alerts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        bus_id INT,
+        severity VARCHAR(20),
+        message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_driver_alerts_bus_id (bus_id),
+        INDEX idx_driver_alerts_created_at (created_at)
+    );
+    
+  02-seed.sql: |
+    -- SmartTransit Seed Data — 200+ rows
+    USE smarttransit;
+    
+    INSERT INTO traffic_routes (id, route_name, start_point, end_point) VALUES
+    (1,'Rute A - Cicaheum - Leuwipanjang','Terminal Cicaheum','Terminal Leuwipanjang'),
+    (2,'Rute B - Dago - Kalapa','Dago','Kalapa'),
+    (3,'Rute C - Cibiru - Cimahi','Cibiru','Cimahi'),
+    (4,'Rute D - Antapani - Pasteur','Antapani','Pasteur'),
+    (5,'Rute E - Buahbatu - Gedebage','Buahbatu','Gedebage'),
+    (6,'Rute F - Margahayu - Soekarno Hatta','Margahayu','Soekarno Hatta'),
+    (7,'Rute G - Ujungberung - Tegallega','Ujungberung','Tegallega'),
+    (8,'Rute H - Arcamanik - Cicendo','Arcamanik','Cicendo');
+    
+    INSERT INTO bus_stops (id, stop_name, latitude, longitude) VALUES
+    (1,'Halte Cicaheum',-6.902,107.643),
+    (2,'Halte Leuwipanjang',-6.952,107.592),
+    (3,'Halte Dago',-6.878,107.61),
+    (4,'Halte Kalapa',-6.915,107.599),
+    (5,'Halte Cibiru',-6.912,107.71),
+    (6,'Halte Antapani',-6.91,107.66),
+    (7,'Halte Pasteur',-6.887,107.589),
+    (8,'Halte Buahbatu',-6.95,107.645),
+    (9,'Halte Gedebage',-6.96,107.705),
+    (10,'Halte Margahayu',-6.961,107.592),
+    (11,'Halte Ujungberung',-6.905,107.72),
+    (12,'Halte Tegallega',-6.943,107.595),
+    (13,'Halte Arcamanik',-6.907,107.69),
+    (14,'Halte Cicendo',-6.902,107.597),
+    (15,'Halte Alun-Alun',-6.921,107.603);
+    
+    INSERT INTO traffic_buses (id, plate_number, route_id, status) VALUES
+    (1,'D 1234 AB',1,'active'),
+    (2,'D 2345 BC',2,'active'),
+    (3,'D 3456 CD',3,'active'),
+    (4,'D 4567 DE',4,'active'),
+    (5,'D 5678 EF',5,'active'),
+    (6,'D 6789 FG',6,'active'),
+    (7,'D 7890 GH',7,'active'),
+    (8,'D 8901 HI',8,'active'),
+    (9,'D 9012 IJ',1,'maintenance'),
+    (10,'D 0123 JK',2,'maintenance');
+    
+    INSERT INTO citizen_users (id, nik, name, email, password_hash, phone) VALUES
+    (1,'3200010101900001','Budi Santoso','budi.santoso@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000001'),
+    (2,'3200020101900002','Siti Rahayu','siti.rahayu@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000002'),
+    (3,'3200030101900003','Ahmad Fauzi','ahmad.fauzi@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000003'),
+    (4,'3200040101900004','Dewi Lestari','dewi.lestari@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000004'),
+    (5,'3200050101900005','Rudi Hermawan','rudi.hermawan@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000005'),
+    (6,'3200060101900006','Fitri Handayani','fitri.handayani@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000006'),
+    (7,'3200070101900007','Agus Setiawan','agus.setiawan@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000007'),
+    (8,'3200080101900008','Rina Permata','rina.permata@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000008'),
+    (9,'3200090101900009','Dedi Kurniawan','dedi.kurniawan@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000009'),
+    (10,'3200100101900010','Yuni Astuti','yuni.astuti@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000010'),
+    (11,'3200110101900011','Hendra Wijaya','hendra.wijaya@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000011'),
+    (12,'3200120101900012','Sri Mulyani','sri.mulyani@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000012'),
+    (13,'3200130101900013','Bambang Suryadi','bambang.suryadi@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000013'),
+    (14,'3200140101900014','Neni Rohaeni','neni.rohaeni@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000014'),
+    (15,'3200150101900015','Eko Prasetyo','eko.prasetyo@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000015'),
+    (16,'3200160101900016','Wati Susanti','wati.susanti@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000016'),
+    (17,'3200170101900017','Feri Gunawan','feri.gunawan@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000017'),
+    (18,'3200180101900018','Lina Marlina','lina.marlina@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000018'),
+    (19,'3200190101900019','Joko Susilo','joko.susilo@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000019'),
+    (20,'3200200101900020','Maya Sari','maya.sari@mail.com','$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uSc/g34Ym','08000000020');
+    
+    INSERT INTO citizen_tickets (id, user_id, route_id, ticket_code, booking_time, status) VALUES
+    (1,2,2,'BUS-2026-0001','2026-06-01 10:00:00','used'),
+    (2,3,3,'BUS-2026-0002','2026-06-01 13:00:00','used'),
+    (3,4,4,'BUS-2026-0003','2026-06-01 16:00:00','used'),
+    (4,5,5,'BUS-2026-0004','2026-06-01 19:00:00','expired'),
+    (5,6,6,'BUS-2026-0005','2026-06-01 22:00:00','active'),
+    (6,7,7,'BUS-2026-0006','2026-06-02 01:00:00','used'),
+    (7,8,8,'BUS-2026-0007','2026-06-02 04:00:00','used'),
+    (8,9,1,'BUS-2026-0008','2026-06-02 07:00:00','used'),
+    (9,10,2,'BUS-2026-0009','2026-06-02 10:00:00','expired'),
+    (10,11,3,'BUS-2026-0010','2026-06-02 13:00:00','active'),
+    (11,12,4,'BUS-2026-0011','2026-06-02 16:00:00','used'),
+    (12,13,5,'BUS-2026-0012','2026-06-02 19:00:00','used'),
+    (13,14,6,'BUS-2026-0013','2026-06-02 22:00:00','used'),
+    (14,15,7,'BUS-2026-0014','2026-06-03 01:00:00','expired'),
+    (15,16,8,'BUS-2026-0015','2026-06-03 04:00:00','active'),
+    (16,17,1,'BUS-2026-0016','2026-06-03 07:00:00','used'),
+    (17,18,2,'BUS-2026-0017','2026-06-03 10:00:00','used'),
+    (18,19,3,'BUS-2026-0018','2026-06-03 13:00:00','used'),
+    (19,20,4,'BUS-2026-0019','2026-06-03 16:00:00','expired'),
+    (20,1,5,'BUS-2026-0020','2026-06-03 19:00:00','active'),
+    (21,2,6,'BUS-2026-0021','2026-06-03 22:00:00','used'),
+    (22,3,7,'BUS-2026-0022','2026-06-04 01:00:00','used'),
+    (23,4,8,'BUS-2026-0023','2026-06-04 04:00:00','used'),
+    (24,5,1,'BUS-2026-0024','2026-06-04 07:00:00','expired'),
+    (25,6,2,'BUS-2026-0025','2026-06-04 10:00:00','active'),
+    (26,7,3,'BUS-2026-0026','2026-06-04 13:00:00','used'),
+    (27,8,4,'BUS-2026-0027','2026-06-04 16:00:00','used'),
+    (28,9,5,'BUS-2026-0028','2026-06-04 19:00:00','used'),
+    (29,10,6,'BUS-2026-0029','2026-06-04 22:00:00','expired'),
+    (30,11,7,'BUS-2026-0030','2026-06-05 01:00:00','active');
+    
+    INSERT INTO citizen_reports (id, user_id, category, description, stop_id, status) VALUES
+    (1,2,'keterlambatan','Kursi penumpang rusak dan tidak nyaman',2,'processing'),
+    (2,3,'keamanan','AC bus tidak berfungsi dengan baik',3,'resolved'),
+    (3,4,'kebersihan','Bus sangat penuh dan tidak aman',4,'pending'),
+    (4,5,'lainnya','Supir mengemudi dengan ugal-ugalan',5,'processing'),
+    (5,6,'kerusakan','Halte dalam kondisi kotor dan tidak terawat',6,'resolved'),
+    (6,7,'keterlambatan','Tidak ada informasi jadwal di halte',7,'pending'),
+    (7,8,'keamanan','Lampu bus tidak menyala saat malam',8,'processing'),
+    (8,9,'kebersihan','Penumpang tidak tertib di dalam bus',9,'resolved'),
+    (9,10,'lainnya','Bus melewati halte tanpa berhenti',10,'pending'),
+    (10,11,'kerusakan','Bus datang terlambat lebih dari 30 menit',11,'processing'),
+    (11,12,'keterlambatan','Kursi penumpang rusak dan tidak nyaman',12,'resolved'),
+    (12,13,'keamanan','AC bus tidak berfungsi dengan baik',13,'pending'),
+    (13,14,'kebersihan','Bus sangat penuh dan tidak aman',14,'processing'),
+    (14,15,'lainnya','Supir mengemudi dengan ugal-ugalan',15,'resolved'),
+    (15,16,'kerusakan','Halte dalam kondisi kotor dan tidak terawat',1,'pending'),
+    (16,17,'keterlambatan','Tidak ada informasi jadwal di halte',2,'processing'),
+    (17,18,'keamanan','Lampu bus tidak menyala saat malam',3,'resolved'),
+    (18,19,'kebersihan','Penumpang tidak tertib di dalam bus',4,'pending'),
+    (19,20,'lainnya','Bus melewati halte tanpa berhenti',5,'processing'),
+    (20,1,'kerusakan','Bus datang terlambat lebih dari 30 menit',6,'resolved'),
+    (21,2,'keterlambatan','Kursi penumpang rusak dan tidak nyaman',7,'pending'),
+    (22,3,'keamanan','AC bus tidak berfungsi dengan baik',8,'processing'),
+    (23,4,'kebersihan','Bus sangat penuh dan tidak aman',9,'resolved'),
+    (24,5,'lainnya','Supir mengemudi dengan ugal-ugalan',10,'pending'),
+    (25,6,'kerusakan','Halte dalam kondisi kotor dan tidak terawat',11,'processing');
+    
+    INSERT INTO citizen_notifications (id, user_id, title, message, is_read) VALUES
+    (1,2,'Peringatan Kepadatan','Bus Bus 2 terdeteksi sangat padat. Harap tunggu bus berikutnya',0),
+    (2,3,'Safety Alert','Bus Bus 3 terdeteksi mengemudi agresif. Harap waspada',0),
+    (3,4,'Tiket Aktif','Tiket BUS-2026-0006 Anda masih aktif hingga hari ini',1),
+    (4,5,'Laporan Diproses','Laporan Anda sedang diproses oleh tim kami',0),
+    (5,6,'Gangguan Layanan','Rute 6 mengalami gangguan sementara. Mohon maaf atas ketidaknyamanannya',0),
+    (6,7,'Info Jadwal','Bus Rute 7 akan tiba dalam 9 menit di halte terdekat Anda',1),
+    (7,8,'Peringatan Kepadatan','Bus Bus 8 terdeteksi sangat padat. Harap tunggu bus berikutnya',0),
+    (8,9,'Safety Alert','Bus Bus 9 terdeteksi mengemudi agresif. Harap waspada',0),
+    (9,10,'Tiket Aktif','Tiket BUS-2026-0012 Anda masih aktif hingga hari ini',1),
+    (10,11,'Laporan Diproses','Laporan Anda sedang diproses oleh tim kami',0),
+    (11,12,'Gangguan Layanan','Rute 4 mengalami gangguan sementara. Mohon maaf atas ketidaknyamanannya',0),
+    (12,13,'Info Jadwal','Bus Rute 5 akan tiba dalam 15 menit di halte terdekat Anda',1),
+    (13,14,'Peringatan Kepadatan','Bus Bus 4 terdeteksi sangat padat. Harap tunggu bus berikutnya',0),
+    (14,15,'Safety Alert','Bus Bus 5 terdeteksi mengemudi agresif. Harap waspada',0),
+    (15,16,'Tiket Aktif','Tiket BUS-2026-0018 Anda masih aktif hingga hari ini',1),
+    (16,17,'Laporan Diproses','Laporan Anda sedang diproses oleh tim kami',0),
+    (17,18,'Gangguan Layanan','Rute 2 mengalami gangguan sementara. Mohon maaf atas ketidaknyamanannya',0),
+    (18,19,'Info Jadwal','Bus Rute 3 akan tiba dalam 21 menit di halte terdekat Anda',1),
+    (19,20,'Peringatan Kepadatan','Bus Bus 10 terdeteksi sangat padat. Harap tunggu bus berikutnya',0),
+    (20,1,'Safety Alert','Bus Bus 1 terdeteksi mengemudi agresif. Harap waspada',0),
+    (21,2,'Tiket Aktif','Tiket BUS-2026-0004 Anda masih aktif hingga hari ini',1),
+    (22,3,'Laporan Diproses','Laporan Anda sedang diproses oleh tim kami',0),
+    (23,4,'Gangguan Layanan','Rute 8 mengalami gangguan sementara. Mohon maaf atas ketidaknyamanannya',0),
+    (24,5,'Info Jadwal','Bus Rute 1 akan tiba dalam 7 menit di halte terdekat Anda',1),
+    (25,6,'Peringatan Kepadatan','Bus Bus 6 terdeteksi sangat padat. Harap tunggu bus berikutnya',0),
+    (26,7,'Safety Alert','Bus Bus 7 terdeteksi mengemudi agresif. Harap waspada',0),
+    (27,8,'Tiket Aktif','Tiket BUS-2026-0010 Anda masih aktif hingga hari ini',1),
+    (28,9,'Laporan Diproses','Laporan Anda sedang diproses oleh tim kami',0),
+    (29,10,'Gangguan Layanan','Rute 6 mengalami gangguan sementara. Mohon maaf atas ketidaknyamanannya',0),
+    (30,11,'Info Jadwal','Bus Rute 7 akan tiba dalam 13 menit di halte terdekat Anda',1);
+    
+    INSERT INTO traffic_bus_locations (id, bus_id, latitude, longitude, speed, recorded_at) VALUES
+    (1,1,-6.905109,107.640137,25.5,'2026-06-24 07:00:00'),
+    (2,1,-6.905119,107.645894,31.8,'2026-06-24 07:05:00'),
+    (3,1,-6.898379,107.640787,32.3,'2026-06-24 07:10:00'),
+    (4,1,-6.904531,107.639045,30.0,'2026-06-24 07:15:00'),
+    (5,2,-6.919435,107.602956,45.1,'2026-06-24 07:15:00'),
+    (6,2,-6.915842,107.59541,48.8,'2026-06-24 07:20:00'),
+    (7,2,-6.917303,107.603521,29.5,'2026-06-24 07:25:00'),
+    (8,2,-6.910145,107.596665,22.1,'2026-06-24 07:30:00'),
+    (9,3,-6.880932,107.606156,25.4,'2026-06-24 07:30:00'),
+    (10,3,-6.877577,107.609818,41.8,'2026-06-24 07:35:00'),
+    (11,3,-6.875745,107.606273,53.9,'2026-06-24 07:40:00'),
+    (12,3,-6.874657,107.610043,29.1,'2026-06-24 07:45:00'),
+    (13,4,-6.954034,107.591944,43.3,'2026-06-24 07:45:00'),
+    (14,4,-6.952688,107.590313,54.9,'2026-06-24 07:50:00'),
+    (15,4,-6.953139,107.589393,44.2,'2026-06-24 07:55:00'),
+    (16,4,-6.950528,107.589202,62.8,'2026-06-24 08:00:00'),
+    (17,5,-6.914939,107.708943,32.8,'2026-06-24 08:00:00'),
+    (18,5,-6.912727,107.709192,49.4,'2026-06-24 08:05:00'),
+    (19,5,-6.907093,107.710869,64.7,'2026-06-24 08:10:00'),
+    (20,5,-6.909945,107.710708,46.5,'2026-06-24 08:15:00'),
+    (21,6,-6.911261,107.658834,49.0,'2026-06-24 08:15:00'),
+    (22,6,-6.910203,107.657096,33.9,'2026-06-24 08:20:00'),
+    (23,6,-6.911085,107.658708,45.0,'2026-06-24 08:25:00'),
+    (24,6,-6.908218,107.662532,40.1,'2026-06-24 08:30:00'),
+    (25,7,-6.884978,107.588277,22.8,'2026-06-24 08:30:00'),
+    (26,7,-6.883029,107.59035,47.2,'2026-06-24 08:35:00'),
+    (27,7,-6.890556,107.586107,26.1,'2026-06-24 08:40:00'),
+    (28,7,-6.889871,107.593418,37.2,'2026-06-24 08:45:00'),
+    (29,8,-6.94785,107.648505,51.6,'2026-06-24 08:45:00'),
+    (30,8,-6.95197,107.641237,41.9,'2026-06-24 08:50:00'),
+    (31,8,-6.948023,107.643164,46.2,'2026-06-24 08:55:00'),
+    (32,8,-6.947209,107.64646,54.7,'2026-06-24 09:00:00'),
+    (33,9,-6.958832,107.704805,37.1,'2026-06-24 09:00:00'),
+    (34,9,-6.962975,107.706653,43.8,'2026-06-24 09:05:00'),
+    (35,9,-6.964391,107.701018,44.1,'2026-06-24 09:10:00'),
+    (36,9,-6.964798,107.707191,42.1,'2026-06-24 09:15:00'),
+    (37,10,-6.962206,107.595552,25.0,'2026-06-24 09:15:00'),
+    (38,10,-6.964938,107.592201,43.4,'2026-06-24 09:20:00'),
+    (39,10,-6.962025,107.596184,61.4,'2026-06-24 09:25:00'),
+    (40,10,-6.958112,107.59195,45.8,'2026-06-24 09:30:00');
+    
+    INSERT INTO traffic_eta_predictions (id, bus_id, stop_id, eta_minutes, predicted_at) VALUES
+    (1,2,2,10,'2026-06-24 08:10:00'),
+    (2,3,3,12,'2026-06-24 08:20:00'),
+    (3,4,4,5,'2026-06-24 08:30:00'),
+    (4,5,5,14,'2026-06-24 08:40:00'),
+    (5,6,6,3,'2026-06-24 08:50:00'),
+    (6,7,7,24,'2026-06-24 09:00:00'),
+    (7,8,8,16,'2026-06-24 09:10:00'),
+    (8,9,9,11,'2026-06-24 09:20:00'),
+    (9,10,10,16,'2026-06-24 09:30:00'),
+    (10,1,11,24,'2026-06-24 09:40:00'),
+    (11,2,12,10,'2026-06-24 09:50:00'),
+    (12,3,13,25,'2026-06-24 10:00:00'),
+    (13,4,14,13,'2026-06-24 10:10:00'),
+    (14,5,15,22,'2026-06-24 10:20:00'),
+    (15,6,1,16,'2026-06-24 10:30:00'),
+    (16,7,2,2,'2026-06-24 10:40:00'),
+    (17,8,3,11,'2026-06-24 10:50:00'),
+    (18,9,4,7,'2026-06-24 11:00:00'),
+    (19,10,5,14,'2026-06-24 11:10:00'),
+    (20,1,6,12,'2026-06-24 11:20:00');
+    
+    INSERT INTO env_passenger_readings (id, bus_id, passenger_count, recorded_at) VALUES
+    (1,2,55,'2026-06-24 07:38:00'),
+    (2,3,13,'2026-06-24 07:46:00'),
+    (3,4,36,'2026-06-24 07:54:00'),
+    (4,5,5,'2026-06-24 08:02:00'),
+    (5,6,23,'2026-06-24 08:10:00'),
+    (6,7,49,'2026-06-24 08:18:00'),
+    (7,8,47,'2026-06-24 08:26:00'),
+    (8,9,13,'2026-06-24 08:34:00'),
+    (9,10,21,'2026-06-24 08:42:00'),
+    (10,1,40,'2026-06-24 08:50:00'),
+    (11,2,40,'2026-06-24 08:58:00'),
+    (12,3,55,'2026-06-24 09:06:00'),
+    (13,4,28,'2026-06-24 09:14:00'),
+    (14,5,32,'2026-06-24 09:22:00'),
+    (15,6,18,'2026-06-24 09:30:00'),
+    (16,7,47,'2026-06-24 09:38:00'),
+    (17,8,29,'2026-06-24 09:46:00'),
+    (18,9,9,'2026-06-24 09:54:00'),
+    (19,10,28,'2026-06-24 10:02:00'),
+    (20,1,13,'2026-06-24 10:10:00'),
+    (21,2,54,'2026-06-24 10:18:00'),
+    (22,3,5,'2026-06-24 10:26:00'),
+    (23,4,26,'2026-06-24 10:34:00'),
+    (24,5,48,'2026-06-24 10:42:00'),
+    (25,6,41,'2026-06-24 10:50:00'),
+    (26,7,55,'2026-06-24 10:58:00'),
+    (27,8,55,'2026-06-24 11:06:00'),
+    (28,9,26,'2026-06-24 11:14:00'),
+    (29,10,43,'2026-06-24 11:22:00'),
+    (30,1,15,'2026-06-24 11:30:00');
+    
+    INSERT INTO env_temperature_readings (id, bus_id, temperature, recorded_at) VALUES
+    (1,2,28.7,'2026-06-24 07:38:00'),
+    (2,3,34.0,'2026-06-24 07:46:00'),
+    (3,4,30.8,'2026-06-24 07:54:00'),
+    (4,5,33.2,'2026-06-24 08:02:00'),
+    (5,6,35.3,'2026-06-24 08:10:00'),
+    (6,7,35.6,'2026-06-24 08:18:00'),
+    (7,8,30.1,'2026-06-24 08:26:00'),
+    (8,9,34.6,'2026-06-24 08:34:00'),
+    (9,10,31.5,'2026-06-24 08:42:00'),
+    (10,1,36.3,'2026-06-24 08:50:00'),
+    (11,2,28.8,'2026-06-24 08:58:00'),
+    (12,3,35.5,'2026-06-24 09:06:00'),
+    (13,4,30.6,'2026-06-24 09:14:00'),
+    (14,5,29.1,'2026-06-24 09:22:00'),
+    (15,6,35.2,'2026-06-24 09:30:00'),
+    (16,7,30.5,'2026-06-24 09:38:00'),
+    (17,8,36.2,'2026-06-24 09:46:00'),
+    (18,9,29.1,'2026-06-24 09:54:00'),
+    (19,10,26.3,'2026-06-24 10:02:00'),
+    (20,1,31.7,'2026-06-24 10:10:00'),
+    (21,2,32.7,'2026-06-24 10:18:00'),
+    (22,3,26.8,'2026-06-24 10:26:00'),
+    (23,4,30.2,'2026-06-24 10:34:00'),
+    (24,5,26.2,'2026-06-24 10:42:00'),
+    (25,6,34.9,'2026-06-24 10:50:00'),
+    (26,7,33.2,'2026-06-24 10:58:00'),
+    (27,8,32.6,'2026-06-24 11:06:00'),
+    (28,9,33.2,'2026-06-24 11:14:00'),
+    (29,10,36.2,'2026-06-24 11:22:00'),
+    (30,1,35.0,'2026-06-24 11:30:00');
+    
+    INSERT INTO env_air_quality_readings (id, bus_id, co2_ppm, recorded_at) VALUES
+    (1,2,734,'2026-06-24 07:38:00'),
+    (2,3,1309,'2026-06-24 07:46:00'),
+    (3,4,993,'2026-06-24 07:54:00'),
+    (4,5,630,'2026-06-24 08:02:00'),
+    (5,6,999,'2026-06-24 08:10:00'),
+    (6,7,1131,'2026-06-24 08:18:00'),
+    (7,8,762,'2026-06-24 08:26:00'),
+    (8,9,1217,'2026-06-24 08:34:00'),
+    (9,10,694,'2026-06-24 08:42:00'),
+    (10,1,646,'2026-06-24 08:50:00'),
+    (11,2,937,'2026-06-24 08:58:00'),
+    (12,3,1335,'2026-06-24 09:06:00'),
+    (13,4,1267,'2026-06-24 09:14:00'),
+    (14,5,1049,'2026-06-24 09:22:00'),
+    (15,6,881,'2026-06-24 09:30:00'),
+    (16,7,1227,'2026-06-24 09:38:00'),
+    (17,8,691,'2026-06-24 09:46:00'),
+    (18,9,977,'2026-06-24 09:54:00'),
+    (19,10,978,'2026-06-24 10:02:00'),
+    (20,1,856,'2026-06-24 10:10:00'),
+    (21,2,781,'2026-06-24 10:18:00'),
+    (22,3,1016,'2026-06-24 10:26:00'),
+    (23,4,779,'2026-06-24 10:34:00'),
+    (24,5,840,'2026-06-24 10:42:00'),
+    (25,6,1000,'2026-06-24 10:50:00'),
+    (26,7,1349,'2026-06-24 10:58:00'),
+    (27,8,700,'2026-06-24 11:06:00'),
+    (28,9,1201,'2026-06-24 11:14:00'),
+    (29,10,688,'2026-06-24 11:22:00'),
+    (30,1,1043,'2026-06-24 11:30:00');
+    
+    INSERT INTO env_alerts (id, bus_id, alert_type, severity, description, created_at) VALUES
+    (1,2,'overcrowded','high','Bus 2: 43 penumpang melebihi kapasitas normal','2026-06-24 08:12:00'),
+    (2,3,'poor_air_quality','critical','Bus 3: CO2 1080 ppm — kualitas udara buruk','2026-06-24 08:24:00'),
+    (3,4,'overheating','critical','Bus 4: suhu 33.6°C sangat berbahaya','2026-06-24 08:36:00'),
+    (4,5,'overcrowded','critical','Bus 5: 46 penumpang — kondisi kritis','2026-06-24 08:48:00'),
+    (5,6,'overheating','high','Bus 6: suhu 34.0°C melebihi batas aman','2026-06-24 09:00:00'),
+    (6,7,'overcrowded','high','Bus 7: 48 penumpang melebihi kapasitas normal','2026-06-24 09:12:00'),
+    (7,8,'poor_air_quality','critical','Bus 8: CO2 1155 ppm — kualitas udara buruk','2026-06-24 09:24:00'),
+    (8,9,'overheating','critical','Bus 9: suhu 34.6°C sangat berbahaya','2026-06-24 09:36:00'),
+    (9,10,'overcrowded','critical','Bus 10: 51 penumpang — kondisi kritis','2026-06-24 09:48:00'),
+    (10,1,'overheating','high','Bus 1: suhu 35.0°C melebihi batas aman','2026-06-24 10:00:00'),
+    (11,2,'overcrowded','high','Bus 2: 43 penumpang melebihi kapasitas normal','2026-06-24 10:12:00'),
+    (12,3,'poor_air_quality','critical','Bus 3: CO2 1230 ppm — kualitas udara buruk','2026-06-24 10:24:00'),
+    (13,4,'overheating','critical','Bus 4: suhu 35.6°C sangat berbahaya','2026-06-24 10:36:00'),
+    (14,5,'overcrowded','critical','Bus 5: 46 penumpang — kondisi kritis','2026-06-24 10:48:00'),
+    (15,6,'overheating','high','Bus 6: suhu 36.0°C melebihi batas aman','2026-06-24 11:00:00'),
+    (16,7,'overcrowded','high','Bus 7: 48 penumpang melebihi kapasitas normal','2026-06-24 11:12:00'),
+    (17,8,'poor_air_quality','critical','Bus 8: CO2 1305 ppm — kualitas udara buruk','2026-06-24 11:24:00'),
+    (18,9,'overheating','critical','Bus 9: suhu 36.6°C sangat berbahaya','2026-06-24 11:36:00'),
+    (19,10,'overcrowded','critical','Bus 10: 51 penumpang — kondisi kritis','2026-06-24 11:48:00'),
+    (20,1,'overheating','high','Bus 1: suhu 37.0°C melebihi batas aman','2026-06-24 12:00:00');
+    
+    INSERT INTO traffic_driver_telemetry (id, bus_id, speed, acceleration, brake_force, turn_rate, vibration, recorded_at) VALUES
+    (1,2,27.7,1.51,2.51,13.6,0.31,'2026-06-24 09:05:00'),
+    (2,3,53.3,0.83,2.41,5.6,0.22,'2026-06-24 09:10:00'),
+    (3,4,43.2,1.78,3.33,9.0,0.21,'2026-06-24 09:15:00'),
+    (4,5,36.9,2.45,1.6,9.9,0.44,'2026-06-24 09:20:00'),
+    (5,6,91.1,5.7,8.5,49.2,2.15,'2026-06-24 09:25:00'),
+    (6,7,27.0,2.49,2.22,6.3,0.11,'2026-06-24 09:30:00'),
+    (7,8,55.1,2.06,2.84,4.9,0.58,'2026-06-24 09:35:00'),
+    (8,9,34.4,2.37,0.6,3.4,0.52,'2026-06-24 09:40:00'),
+    (9,10,44.7,1.14,2.83,9.7,0.58,'2026-06-24 09:45:00'),
+    (10,1,86.0,5.38,8.99,39.6,2.94,'2026-06-24 09:50:00'),
+    (11,2,44.4,0.87,3.08,7.3,0.56,'2026-06-24 09:55:00'),
+    (12,3,51.5,1.7,1.2,14.2,0.55,'2026-06-24 10:00:00'),
+    (13,4,49.5,1.12,2.4,4.5,0.43,'2026-06-24 10:05:00'),
+    (14,5,46.4,0.69,3.17,8.2,0.26,'2026-06-24 10:10:00'),
+    (15,6,81.2,6.59,8.56,39.1,2.73,'2026-06-24 10:15:00'),
+    (16,7,53.5,2.18,0.61,12.4,0.4,'2026-06-24 10:20:00'),
+    (17,8,56.9,1.4,2.08,14.0,0.24,'2026-06-24 10:25:00'),
+    (18,9,46.0,1.73,1.25,14.6,0.5,'2026-06-24 10:30:00'),
+    (19,10,46.2,2.38,1.71,2.5,0.21,'2026-06-24 10:35:00'),
+    (20,1,102.5,6.68,9.01,43.2,3.0,'2026-06-24 10:40:00'),
+    (21,2,25.5,1.08,3.34,4.5,0.29,'2026-06-24 10:45:00'),
+    (22,3,29.3,1.35,1.44,2.7,0.24,'2026-06-24 10:50:00'),
+    (23,4,47.0,0.97,1.17,8.4,0.34,'2026-06-24 10:55:00'),
+    (24,5,34.7,2.17,1.14,9.2,0.2,'2026-06-24 11:00:00'),
+    (25,6,86.6,7.27,9.0,49.0,2.35,'2026-06-24 11:05:00'),
+    (26,7,49.1,2.12,3.01,7.2,0.26,'2026-06-24 11:10:00'),
+    (27,8,54.9,1.84,1.97,12.9,0.19,'2026-06-24 11:15:00'),
+    (28,9,36.4,2.12,2.49,7.2,0.57,'2026-06-24 11:20:00'),
+    (29,10,41.4,0.98,2.3,14.0,0.22,'2026-06-24 11:25:00'),
+    (30,1,107.3,6.52,8.89,44.8,2.61,'2026-06-24 11:30:00');
+    
+    INSERT INTO citizen_driver_alerts (id, bus_id, severity, message) VALUES
+    (1,2,'medium','Bus 2 terdeteksi mengemudi aggressive'),
+    (2,3,'high','Bus 3 terdeteksi mengemudi dangerous'),
+    (3,4,'medium','Bus 4 terdeteksi mengemudi aggressive'),
+    (4,5,'medium','Bus 5 terdeteksi mengemudi aggressive'),
+    (5,6,'high','Bus 6 terdeteksi mengemudi dangerous'),
+    (6,7,'medium','Bus 7 terdeteksi mengemudi aggressive'),
+    (7,8,'high','Bus 8 terdeteksi mengemudi dangerous'),
+    (8,9,'medium','Bus 9 terdeteksi mengemudi aggressive'),
+    (9,10,'medium','Bus 10 terdeteksi mengemudi aggressive'),
+    (10,1,'high','Bus 1 terdeteksi mengemudi dangerous'),
+    (11,2,'medium','Bus 2 terdeteksi mengemudi aggressive'),
+    (12,3,'high','Bus 3 terdeteksi mengemudi dangerous'),
+    (13,4,'medium','Bus 4 terdeteksi mengemudi aggressive'),
+    (14,5,'medium','Bus 5 terdeteksi mengemudi aggressive'),
+    (15,6,'high','Bus 6 terdeteksi mengemudi dangerous');
+    
+    INSERT INTO oauth_clients (id, client_id, client_secret, client_name) VALUES
+    (1,'smarttransit-mobile','secret-mobile-client','SmartTransit Mobile App'),
+    (2,'smarttransit-web','secret-web-client','SmartTransit Web Dashboard');
+    
